@@ -24,6 +24,31 @@ pub struct Theme {
     pub nick_palette: &'static [Color],
 }
 
+const fn rgb(hex: u32) -> Color {
+    Color::Rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
+}
+
+/// The desktop client's palettes, by the same names, so one `theme` setting serves both.
+/// Foreground stays the terminal's own so light and dark terminals both read well.
+fn theme_named(name: &str) -> Theme {
+    let (accent, highlight, own, bar_bg) = match name {
+        "aurora" => (0x34d399, 0xfde047, 0xf472b6, 0x10221d),
+        "ember" => (0xfb923c, 0xfacc15, 0xf43f5e, 0x211814),
+        "synthwave" => (0x22d3ee, 0xfde047, 0xf472b6, 0x1d1238),
+        "mocha" => (0xcba6f7, 0xf9e2af, 0xa6e3a1, 0x313244),
+        "phosphor" => (0x7dff9b, 0xffd37d, 0xc6ff7d, 0x081208),
+        "paper" => (0x0f766e, 0xb45309, 0x7c3aed, 0xe8e3d7),
+        _ => (0x5eead4, 0xfbbf24, 0xa78bfa, 0x171b28),
+    };
+    Theme {
+        accent: rgb(accent),
+        highlight: rgb(highlight),
+        own: rgb(own),
+        bar_bg: rgb(bar_bg),
+        ..DARK
+    }
+}
+
 pub const DARK: Theme = Theme {
     fg: Color::Reset,
     dim: Color::DarkGray,
@@ -247,7 +272,7 @@ fn wrap(spans: Vec<Span<'static>>, width: usize, indent: usize) -> Vec<Line<'sta
 }
 
 pub fn draw(f: &mut Frame, app: &mut App, tz_offset: i64) {
-    let theme = &DARK;
+    let theme = &theme_named(&app.config.ui.theme);
     let area = f.area();
     let [main, status, input] = Layout::vertical([
         Constraint::Min(1),

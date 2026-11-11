@@ -371,6 +371,7 @@ impl qobject::Controller {
                 app.set_status(e);
             }
         }
+        app.config_path = Some(path.clone());
         let settings = json_str(&settings_json(&app));
         {
             let r = self.as_mut().rust_mut().get_mut();
@@ -711,8 +712,13 @@ impl qobject::Controller {
             })
             .collect();
         let transfers = json_str(&transfers.into());
+        // Commands like /theme change settings too; pick that up here.
+        let settings = json_str(&settings_json(app));
 
         let mut this = self.as_mut();
+        if *this.settings() != settings {
+            this.as_mut().set_settings(settings);
+        }
         if *this.transfers() != transfers {
             this.as_mut().set_transfers(transfers);
         }

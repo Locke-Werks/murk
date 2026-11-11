@@ -47,6 +47,10 @@ pub const HELP: &[(&str, &str)] = &[
         "dcc",
         "/dcc [list | get [id] | decline <id> | send <nick> <path>]",
     ),
+    (
+        "theme",
+        "/theme [name]: murk, aurora, ember, synthwave, mocha, phosphor, paper",
+    ),
     ("notice", "/notice <target> <text>"),
     ("nick", "/nick <newnick>"),
     ("topic", "/topic [new topic]"),

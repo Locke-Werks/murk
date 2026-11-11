@@ -86,6 +86,7 @@ async fn main() {
     let tz_offset = i64::from(chrono::Local::now().offset().local_minus_utc());
     let engine = Engine::new();
     let mut app = App::new(engine.clone(), store, config);
+    app.config_path = Some(args.config.clone());
 
     let mut startup: Vec<String> = app
         .config

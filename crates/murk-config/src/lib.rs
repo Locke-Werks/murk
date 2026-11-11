@@ -150,7 +150,7 @@ pub struct Ui {
 impl Default for Ui {
     fn default() -> Self {
         Ui {
-            theme: "murk-dark".into(),
+            theme: "murk".into(),
             timestamp_format: "%H:%M".into(),
             show_joins_parts: true,
             nicklist: true,

@@ -136,6 +136,8 @@ pub struct App {
     /// Lua scripts from the config directory's `scripts` folder.
     pub scripts: Option<murk_script::ScriptHost>,
     pub transfers: crate::dcc::Transfers,
+    /// Where settings changed from commands (such as /theme) are saved.
+    pub config_path: Option<std::path::PathBuf>,
 }
 
 impl App {
@@ -150,6 +152,7 @@ impl App {
         App {
             scripts: None,
             transfers: Default::default(),
+            config_path: None,
             engine,
             store,
             config,
@@ -1158,6 +1161,32 @@ impl App {
             let cmd = cmd.to_lowercase();
             if cmd == "script" || cmd == "scripts" {
                 self.script_command(args.trim());
+                return;
+            }
+            if cmd == "theme" {
+                const THEMES: [&str; 7] = [
+                    "murk",
+                    "aurora",
+                    "ember",
+                    "synthwave",
+                    "mocha",
+                    "phosphor",
+                    "paper",
+                ];
+                let want = args.trim().to_lowercase();
+                if THEMES.contains(&want.as_str()) {
+                    self.config.ui.theme = want.clone();
+                    if let Some(p) = &self.config_path {
+                        let _ = self.config.save(p);
+                    }
+                    self.info(&format!("Theme set to {want}"));
+                } else {
+                    self.info(&format!(
+                        "Themes: {}. Current: {}",
+                        THEMES.join(", "),
+                        self.config.ui.theme
+                    ));
+                }
                 return;
             }
             if cmd == "dcc" {
