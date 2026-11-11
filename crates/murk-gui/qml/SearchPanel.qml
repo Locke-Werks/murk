@@ -101,6 +101,8 @@ Popup {
         }
 
         ListView {
+            id: resultList
+            SmoothWheel { flick: resultList }
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true

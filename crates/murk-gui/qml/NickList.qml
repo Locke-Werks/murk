@@ -51,6 +51,8 @@ Rectangle {
         }
 
         ListView {
+            id: nickView
+            SmoothWheel { flick: nickView }
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true

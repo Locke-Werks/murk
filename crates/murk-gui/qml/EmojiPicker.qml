@@ -40,6 +40,7 @@ Popup {
         }
         GridView {
             id: grid
+            SmoothWheel { flick: grid }
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true

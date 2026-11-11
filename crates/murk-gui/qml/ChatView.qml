@@ -153,6 +153,16 @@ Item {
                 // Follow new lines until the user scrolls up.
                 property bool stick: true
                 property int missed: 0
+                // Wheel scrolling moves contentY directly, so the flick signals that
+                // normally decide `stick` never fire; this does it instead.
+                SmoothWheel {
+                    flick: list
+                    onScrolled: function (atEnd) {
+                        list.stick = atEnd
+                        if (atEnd)
+                            list.missed = 0
+                    }
+                }
                 onMovementEnded: { stick = atYEnd; if (stick) missed = 0 }
                 // Previews and reactions grow lines after they land; stay pinned while that happens.
                 onContentHeightChanged: if (stick && !moving) Qt.callLater(positionViewAtEnd)

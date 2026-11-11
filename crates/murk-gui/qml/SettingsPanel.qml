@@ -105,6 +105,8 @@ Popup {
 
             // Appearance.
             Flickable {
+            id: settingsFlick
+            SmoothWheel { flick: settingsFlick }
                 contentHeight: appearance.implicitHeight
                 clip: true
                 ColumnLayout {

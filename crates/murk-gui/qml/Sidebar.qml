@@ -104,6 +104,7 @@ Rectangle {
 
         ListView {
             id: list
+            SmoothWheel { flick: list }
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true

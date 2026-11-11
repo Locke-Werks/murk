@@ -113,6 +113,8 @@ Popup {
             font.pixelSize: 12
         }
         ListView {
+            id: browseList
+            SmoothWheel { flick: browseList }
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.bottomMargin: 12
