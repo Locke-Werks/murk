@@ -186,7 +186,13 @@ ApplicationWindow {
             DropArea {
                 id: drop
                 anchors.fill: parent
-                keys: ["text/uri-list"]
+                // No `keys` filter: Explorer, browsers and chat apps package a file drag
+                // under different formats. Anything that carries file URLs is welcome.
+                onEntered: function (ev) {
+                    ev.accepted = ev.hasUrls
+                    if (ev.hasUrls)
+                        ev.acceptProposedAction()
+                }
                 // Images, video and audio go to the upload host and appear inline for
                 // everyone. Anything else can only travel by DCC, to one person.
                 readonly property bool canShare: chat.composer.uploadReady
