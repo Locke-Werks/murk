@@ -506,6 +506,24 @@ impl Session {
                 );
                 self.server_line(&mut out, m, text);
             }
+            // MONITOR presence: "nick!user@host,nick2" online, "nick,nick2" offline.
+            "730" | "731" => {
+                let nicks: Vec<String> = m
+                    .params
+                    .last()
+                    .map(|s| {
+                        s.split(',')
+                            .map(|t| t.split('!').next().unwrap_or("").trim().to_string())
+                            .filter(|n| !n.is_empty())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                out.events.push(Event::Presence {
+                    network: self.id,
+                    nicks,
+                    online: m.command == "730",
+                });
+            }
             // Channel LIST: gathered and published once, never printed line by line.
             "321" => self.listing.clear(),
             "322" => {

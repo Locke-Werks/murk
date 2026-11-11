@@ -124,6 +124,12 @@ pub enum Event {
         nick: String,
         active: bool,
     },
+    /// Watched nicks (MONITOR) came online or went offline.
+    Presence {
+        network: NetworkId,
+        nicks: Vec<String>,
+        online: bool,
+    },
     /// A finished LIST reply, busiest channels first.
     ChannelList {
         network: NetworkId,

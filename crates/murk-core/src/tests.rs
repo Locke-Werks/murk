@@ -345,6 +345,18 @@ async fn engine_talks_to_a_server() {
 }
 
 #[test]
+fn monitor_presence() {
+    let mut s = session();
+    register(&mut s);
+    let out = feed(&mut s, ":srv 730 murk :alice!a@h,bob!b@h");
+    assert!(out.events.iter().any(|e| matches!(e,
+        Event::Presence { nicks, online: true, .. } if nicks == &vec!["alice".to_string(), "bob".to_string()])));
+    let out = feed(&mut s, ":srv 731 murk :alice");
+    assert!(out.events.iter().any(|e| matches!(e,
+        Event::Presence { nicks, online: false, .. } if nicks == &vec!["alice".to_string()])));
+}
+
+#[test]
 fn whois_is_collected_into_one_event() {
     let mut s = session();
     register(&mut s);

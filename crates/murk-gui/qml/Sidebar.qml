@@ -245,6 +245,71 @@ Rectangle {
             }
         }
 
+        // Friends, watched with MONITOR: who is around right now.
+        Item {
+            id: friendsBox
+            readonly property var friends: Core.settings.friends || []
+            Layout.fillWidth: true
+            Layout.preferredHeight: friends.length ? friendsCol.implicitHeight + 16 : 0
+            visible: friends.length > 0
+            Rectangle { width: parent.width; height: 1; color: Theme.line }
+            Column {
+                id: friendsCol
+                x: 18; y: 10
+                width: parent.width - 30
+                spacing: 4
+                Text {
+                    text: "FRIENDS · " + friendsBox.friends.filter(f => f.online.length).length + " online"
+                    color: Theme.faint
+                    font.family: Theme.uiFont
+                    font.pixelSize: 10
+                    font.weight: Font.DemiBold
+                    font.letterSpacing: 0.8
+                }
+                Flow {
+                    width: parent.width
+                    spacing: 6
+                    Repeater {
+                        model: friendsBox.friends
+                        Rectangle {
+                            required property var modelData
+                            readonly property bool on: modelData.online.length > 0
+                            height: 24
+                            width: fr.implicitWidth + 16
+                            radius: 12
+                            color: fHover.hovered ? Theme.hover : Theme.alpha(Theme.text, 0.05)
+                            opacity: on ? 1 : 0.55
+                            Row {
+                                id: fr
+                                anchors.centerIn: parent
+                                spacing: 6
+                                Rectangle {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 7; height: 7; radius: 3.5
+                                    color: parent.parent.on ? Theme.ok : Theme.faint
+                                }
+                                Text {
+                                    text: modelData.nick
+                                    color: Theme.text
+                                    font.family: Theme.uiFont
+                                    font.pixelSize: 12
+                                }
+                            }
+                            HoverHandler { id: fHover }
+                            ToolTip.visible: fHover.hovered
+                            ToolTip.delay: 500
+                            ToolTip.text: on ? "Online on " + modelData.online.join(", ") + ". Click to chat." : "Offline"
+                            TapHandler { onTapped: Core.ctl.submit("/query " + modelData.nick) }
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                onTapped: Core.ctl.submit("/friend remove " + modelData.nick)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Footer: who we are, and the doors to everything else.
         Rectangle {
             Layout.fillWidth: true

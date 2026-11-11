@@ -140,6 +140,8 @@ pub struct App {
     pub config_path: Option<std::path::PathBuf>,
     /// Networks we already explained do not relay reactions.
     told_no_reactions: Vec<NetworkId>,
+    /// Friends online per network, from MONITOR.
+    pub online: HashMap<NetworkId, Vec<String>>,
 }
 
 impl App {
@@ -156,6 +158,7 @@ impl App {
             transfers: Default::default(),
             config_path: None,
             told_no_reactions: Vec::new(),
+            online: HashMap::new(),
             engine,
             store,
             config,
@@ -409,9 +412,11 @@ impl App {
                 let name = self.net_name(network);
                 match state {
                     ConnState::Connected => {
+                        self.watch_friends(network, true, &self.config.ui.friends.clone());
                         self.script_event(network, "connect", &[("network", &name)])
                     }
                     ConnState::Disconnected => {
+                        self.online.remove(&network);
                         self.script_event(network, "disconnect", &[("network", &name)])
                     }
                     _ => {}
@@ -522,6 +527,29 @@ impl App {
                         self.bell = true;
                     }
                     Err(e) => self.local_line(network, Some(from), LineKind::Server, &e),
+                }
+            }
+            Event::Presence {
+                network,
+                nicks,
+                online,
+            } => {
+                let list = self.online.entry(network).or_default();
+                for n in &nicks {
+                    list.retain(|x| !x.eq_ignore_ascii_case(n));
+                    if online {
+                        list.push(n.clone());
+                    }
+                }
+                list.sort_by_key(|n| n.to_lowercase());
+                let net = self.net_name(network);
+                let verb = if online { "is online" } else { "went offline" };
+                for n in nicks {
+                    let text = format!("{n} {verb} on {net}");
+                    self.local_line(network, None, LineKind::Server, &text);
+                    if online {
+                        self.set_status(text);
+                    }
                 }
             }
             Event::ChannelList { network, channels } => {
@@ -726,6 +754,109 @@ impl App {
                 buffer: b.name.clone(),
             },
             None => murk_script::Ctx::default(),
+        }
+    }
+
+    /// Start or stop watching nicks with MONITOR, where the server supports it.
+    fn watch_friends(&self, network: NetworkId, add: bool, nicks: &[String]) {
+        if nicks.is_empty() {
+            return;
+        }
+        let supported = self
+            .engine
+            .with_state(network, |s| s.isupport.get("MONITOR").is_some())
+            .unwrap_or(false);
+        if !supported {
+            return;
+        }
+        // Keep lines well under the 512-byte limit.
+        for chunk in nicks.chunks(20) {
+            let sign = if add { '+' } else { '-' };
+            self.engine
+                .send(network, Command::Raw(format!("MONITOR {sign} {}", chunk.join(","))));
+        }
+    }
+
+    /// Friends and where they are online, sorted with online friends first.
+    pub fn friends(&self) -> Vec<(String, Vec<String>)> {
+        let mut v: Vec<(String, Vec<String>)> = self
+            .config
+            .ui
+            .friends
+            .iter()
+            .map(|f| {
+                let nets = self
+                    .online
+                    .iter()
+                    .filter(|(_, list)| list.iter().any(|n| n.eq_ignore_ascii_case(f)))
+                    .map(|(id, _)| self.net_name(*id))
+                    .collect();
+                (f.clone(), nets)
+            })
+            .collect();
+        v.sort_by(|a, b| b.1.is_empty().cmp(&a.1.is_empty()).reverse().then(a.0.cmp(&b.0)));
+        v
+    }
+
+    /// Add or remove a friend everywhere, and save.
+    pub fn set_friend(&mut self, nick: &str, friend: bool) {
+        let nick = nick.trim().to_string();
+        if nick.is_empty() {
+            return;
+        }
+        self.config.ui.friends.retain(|f| !f.eq_ignore_ascii_case(&nick));
+        if friend {
+            self.config.ui.friends.push(nick.clone());
+        }
+        if let Some(p) = &self.config_path {
+            let _ = self.config.save(p);
+        }
+        let connected: Vec<NetworkId> = self
+            .networks
+            .iter()
+            .filter(|(_, n)| n.state == ConnState::Connected)
+            .map(|(id, _)| *id)
+            .collect();
+        for net in connected {
+            self.watch_friends(net, friend, std::slice::from_ref(&nick));
+            if !friend
+                && let Some(list) = self.online.get_mut(&net)
+            {
+                list.retain(|n| !n.eq_ignore_ascii_case(&nick));
+            }
+        }
+    }
+
+    fn friend_command(&mut self, args: &str) {
+        let mut it = args.split_whitespace();
+        match (it.next(), it.next()) {
+            (Some("add"), Some(n)) => {
+                self.set_friend(n, true);
+                self.info(&format!("{n} is now a friend. You will see when they come online."));
+            }
+            (Some("remove") | Some("del"), Some(n)) => {
+                self.set_friend(n, false);
+                self.info(&format!("{n} removed from friends"));
+            }
+            _ => {
+                let lines: Vec<String> = self
+                    .friends()
+                    .into_iter()
+                    .map(|(n, nets)| {
+                        if nets.is_empty() {
+                            format!("  {n}: offline")
+                        } else {
+                            format!("  {n}: online on {}", nets.join(", "))
+                        }
+                    })
+                    .collect();
+                if lines.is_empty() {
+                    self.info("No friends yet. /friend add <nick> watches someone.");
+                }
+                for l in lines {
+                    self.info(&l);
+                }
+            }
         }
     }
 
@@ -1252,6 +1383,10 @@ impl App {
                         self.config.ui.theme
                     ));
                 }
+                return;
+            }
+            if cmd == "friend" || cmd == "friends" {
+                self.friend_command(args.trim());
                 return;
             }
             if cmd == "dcc" {

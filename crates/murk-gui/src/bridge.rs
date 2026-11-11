@@ -335,6 +335,9 @@ fn settings_json(app: &App) -> serde_json::Value {
         "highlights": ui.highlights,
         "inlineMedia": ui.inline_media,
         "notifyDesktop": ui.notify_desktop,
+        "friends": app.friends().into_iter()
+            .map(|(nick, nets)| serde_json::json!({ "nick": nick, "online": nets }))
+            .collect::<Vec<_>>(),
     })
 }
 

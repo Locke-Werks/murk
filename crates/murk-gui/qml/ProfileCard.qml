@@ -170,6 +170,16 @@ Popup {
                     contentItem: Text { text: parent.text; color: Theme.text; font.family: Theme.uiFont; font.pixelSize: 13; horizontalAlignment: Text.AlignHCenter }
                     background: Rectangle { radius: 10; implicitHeight: 36; color: parent.hovered ? Theme.hover : Theme.alpha(Theme.text, 0.06) }
                 }
+                Button {
+                    readonly property bool isFriend: (Core.settings.friends || []).some(f => f.nick.toLowerCase() === root.nick.toLowerCase())
+                    Layout.preferredWidth: 44
+                    text: isFriend ? "★" : "☆"
+                    ToolTip.visible: hovered
+                    ToolTip.text: isFriend ? "Remove friend" : "Add friend: see when they come online"
+                    onClicked: Core.ctl.submit("/friend " + (isFriend ? "remove " : "add ") + root.nick)
+                    contentItem: Text { text: parent.text; color: parent.isFriend ? Theme.warn : Theme.text; font.pixelSize: 16; horizontalAlignment: Text.AlignHCenter }
+                    background: Rectangle { radius: 10; implicitHeight: 36; color: parent.hovered ? Theme.hover : Theme.alpha(Theme.text, 0.06) }
+                }
             }
         }
     }
