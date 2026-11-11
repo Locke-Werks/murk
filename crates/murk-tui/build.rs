@@ -1,0 +1,36 @@
+fn main() {
+    windows_resources("Murk terminal client", "murk");
+}
+
+/// Icon and version resource. The .rc is a template so the version comes from Cargo.
+fn windows_resources(desc: &str, name: &str) {
+    println!("cargo:rerun-if-changed=murk.rc");
+    println!("cargo:rerun-if-changed=../../assets/murk.ico");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+    let ver = std::env::var("CARGO_PKG_VERSION").unwrap();
+    let mut parts: Vec<String> = ver
+        .split(['.', '-'])
+        .take(3)
+        .map(|p| p.parse::<u16>().unwrap_or(0).to_string())
+        .collect();
+    parts.resize(4, "0".into());
+    let dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    let icon = dir.join("../../assets/murk.ico").canonicalize().unwrap();
+    // rc.exe wants a plain path, without the \\?\ prefix canonicalize adds on Windows.
+    let icon = icon.display().to_string().replace("\\\\?\\", "").replace('\\', "/");
+    let rc = std::fs::read_to_string(dir.join("murk.rc"))
+        .unwrap()
+        .replace("@COMMA@", &parts.join(","))
+        .replace("@VER@", &ver)
+        .replace("@DESC@", desc)
+        .replace("@NAME@", name)
+        .replace("@FILE@", &format!("{name}.exe"))
+        .replace("@ICON@", &icon);
+    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("murk.rc");
+    std::fs::write(&out, rc).unwrap();
+    embed_resource::compile(&out, embed_resource::NONE)
+        .manifest_optional()
+        .unwrap();
+}

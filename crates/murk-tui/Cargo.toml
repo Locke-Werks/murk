@@ -22,3 +22,6 @@ unicode-width = "0.2.3"
 [[bin]]
 name = "murk"
 path = "src/main.rs"
+
+[build-dependencies]
+embed-resource = "3.0.12"
