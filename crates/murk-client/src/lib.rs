@@ -3,6 +3,7 @@
 
 pub mod app;
 pub mod editor;
+pub mod emoji;
 
 pub use app::{App, Buffer, Network};
 pub use editor::Editor;

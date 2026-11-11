@@ -138,6 +138,11 @@ pub struct Ui {
     pub nicklist: bool,
     pub highlights: Vec<String>,
     pub scrollback_page: u32,
+    /// Desktop layout: "cozy" groups messages under avatars, "compact" is one line per message.
+    pub layout: String,
+    pub font_size: u32,
+    /// Show linked images and video thumbnails inline. Fetching them reveals your address to the host.
+    pub inline_media: bool,
 }
 
 impl Default for Ui {
@@ -149,6 +154,9 @@ impl Default for Ui {
             nicklist: true,
             highlights: Vec::new(),
             scrollback_page: 200,
+            layout: "cozy".into(),
+            font_size: 11,
+            inline_media: true,
         }
     }
 }

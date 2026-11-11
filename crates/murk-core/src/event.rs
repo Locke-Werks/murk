@@ -48,6 +48,8 @@ pub struct Line {
     pub highlight: bool,
     /// Set for lines replayed from chathistory/bouncer playback.
     pub history: bool,
+    /// msgid of the message this one answers (`+draft/reply`).
+    pub reply_to: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,6 +97,14 @@ pub enum Event {
         nick: String,
         active: bool,
     },
+    /// An emoji reaction (`+draft/react`) to an earlier message.
+    React {
+        network: NetworkId,
+        buffer: String,
+        msgid: String,
+        nick: String,
+        emoji: String,
+    },
     /// Every message as received, for raw view and scripts.
     Raw {
         network: NetworkId,
@@ -139,5 +149,17 @@ pub enum Command {
     Typing {
         target: String,
         active: bool,
+    },
+    /// React to a message by msgid.
+    React {
+        target: String,
+        msgid: String,
+        emoji: String,
+    },
+    /// Send text as a reply to a message by msgid.
+    Reply {
+        target: String,
+        msgid: String,
+        text: String,
     },
 }

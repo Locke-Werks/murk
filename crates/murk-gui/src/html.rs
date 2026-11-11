@@ -1,13 +1,9 @@
 //! Buffer lines rendered as Qt rich text (the HTML 4 subset QML `Text` understands).
 
-use murk_core::{Line, LineKind};
 use murk_proto::format::{self, Color};
 
 pub const FG: &str = "#cdd6f4";
-pub const DIM: &str = "#7f849c";
-pub const HIGHLIGHT: &str = "#f9e2af";
 pub const OWN: &str = "#89b4fa";
-pub const ERROR: &str = "#f38ba8";
 
 const NICK_PALETTE: [&str; 12] = [
     "#f5e0dc", "#f2cdcd", "#f5c2e7", "#cba6f7", "#f38ba8", "#eba0ac", "#fab387", "#a6e3a1",
@@ -112,59 +108,6 @@ pub fn styled(text: &str) -> String {
             out.push_str(&format!("<span style=\"{style}\">{body}</span>"));
         }
     }
-    out
-}
-
-fn span(color: &str, text: &str) -> String {
-    format!("<span style=\"color:{color}\">{}</span>", escape(text))
-}
-
-/// One buffer line. `ts` is the formatted timestamp.
-pub fn line(l: &Line, ts: &str) -> String {
-    let sender = l.sender.as_deref().unwrap_or("");
-    let nc = if l.own { OWN } else { nick_color(sender) };
-    let opt = |r: &Option<String>| r.as_ref().map(|r| format!(" ({r})")).unwrap_or_default();
-    let mut out = span(DIM, ts);
-    out.push_str("&nbsp;&nbsp;");
-    let event = |s: String| span(DIM, &s);
-    let prefix = match &l.kind {
-        LineKind::Privmsg => format!("<b style=\"color:{nc}\">{}</b>&nbsp;&nbsp;", escape(sender)),
-        LineKind::Notice => format!("<span style=\"color:{nc}\">-{}-</span> ", escape(sender)),
-        LineKind::Action => format!("<span style=\"color:{nc}\">* {}</span> ", escape(sender)),
-        LineKind::Join => return out + &event(format!("\u{2192} {sender} joined")),
-        LineKind::Part { reason } => {
-            return out + &event(format!("\u{2190} {sender} left{}", opt(reason)));
-        }
-        LineKind::Quit { reason } => {
-            return out + &event(format!("\u{2190} {sender} quit{}", opt(reason)));
-        }
-        LineKind::Kick { target, reason } => {
-            return out
-                + &event(format!(
-                    "\u{2190} {target} was kicked by {sender}{}",
-                    opt(reason)
-                ));
-        }
-        LineKind::Nick { new } => return out + &event(format!("{sender} is now {new}")),
-        LineKind::Topic => event(format!("{sender} set the topic: ")),
-        LineKind::Mode => event(format!("{sender} sets mode ")),
-        LineKind::Server => String::new(),
-        LineKind::Error => span(ERROR, "error: "),
-    };
-    out.push_str(&prefix);
-    let color = if l.highlight {
-        HIGHLIGHT
-    } else if l.history || matches!(l.kind, LineKind::Server) {
-        DIM
-    } else {
-        FG
-    };
-    let action = matches!(l.kind, LineKind::Action);
-    out.push_str(&format!(
-        "<span style=\"color:{color}{}\">{}</span>",
-        if action { ";font-style:italic" } else { "" },
-        styled(&l.text)
-    ));
     out
 }
 

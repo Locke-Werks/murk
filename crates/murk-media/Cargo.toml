@@ -1,0 +1,16 @@
+[package]
+name = "murk-media"
+description = "Link previews for Murk: bounded fetching, OpenGraph cards, and an image cache"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "charset", "http2", "gzip"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1.54.1", features = ["fs", "sync", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["rt", "macros"] }

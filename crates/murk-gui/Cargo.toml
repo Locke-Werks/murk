@@ -18,8 +18,10 @@ cxx-qt-lib = { version = "0.10.0", features = ["qt_gui", "qt_qml", "qt_quickcont
 murk-client = { version = "0.1.0", path = "../murk-client" }
 murk-config = { version = "0.1.0", path = "../murk-config" }
 murk-core = { version = "0.1.0", path = "../murk-core" }
+murk-media = { version = "0.1.0", path = "../murk-media" }
 murk-proto = { version = "0.1.0", path = "../murk-proto" }
 murk-store = { version = "0.1.0", path = "../murk-store" }
+notify-rust = "4.19.0"
 serde_json = "1"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 

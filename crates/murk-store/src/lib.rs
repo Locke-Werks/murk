@@ -310,6 +310,7 @@ mod tests {
             own: false,
             highlight: false,
             history: false,
+            reply_to: None,
         }
     }
 

@@ -27,6 +27,12 @@ pub struct Buffer {
     pub history_exhausted: bool,
     pub typing: HashMap<String, Instant>,
     pub joined: bool,
+    /// Reactions by target msgid: emoji and who reacted, in arrival order.
+    pub reactions: HashMap<String, Vec<(String, Vec<String>)>>,
+    /// Time of the newest line seen before the user last left this buffer.
+    pub read_marker: Option<SystemTime>,
+    /// Bumped on every visible change, so views can skip identical redraws.
+    pub rev: u64,
 }
 
 impl Buffer {
@@ -42,7 +48,29 @@ impl Buffer {
             history_exhausted: false,
             typing: HashMap::new(),
             joined: false,
+            reactions: HashMap::new(),
+            read_marker: None,
+            rev: 0,
         }
+    }
+
+    /// Toggle-free add: a nick reacting twice with the same emoji counts once.
+    pub fn add_reaction(&mut self, msgid: String, emoji: String, nick: String) {
+        let list = self.reactions.entry(msgid).or_default();
+        match list.iter_mut().find(|(e, _)| *e == emoji) {
+            Some((_, nicks)) if nicks.contains(&nick) => return,
+            Some((_, nicks)) => nicks.push(nick),
+            None => list.push((emoji, vec![nick])),
+        }
+        self.rev += 1;
+    }
+
+    /// The line with this msgid, if still loaded.
+    pub fn find_msgid(&self, msgid: &str) -> Option<&Line> {
+        self.lines
+            .iter()
+            .rev()
+            .find(|l| l.msgid.as_deref() == Some(msgid))
     }
 
     pub fn is_channel_like(&self) -> bool {
@@ -215,6 +243,7 @@ impl App {
             buf.oldest_id = Some(first.id);
         }
         for s in page.into_iter().rev() {
+            buf.rev += 1;
             buf.lines.push_front(Line {
                 network: buf.network,
                 buffer: buf.name.clone(),
@@ -226,6 +255,7 @@ impl App {
                 own: s.own,
                 highlight: s.highlight,
                 history: true,
+                reply_to: None,
             });
         }
     }
@@ -284,6 +314,9 @@ impl App {
     }
 
     fn mark_read(&mut self) {
+        if let Some(b) = self.buffers.get_mut(self.active) {
+            b.read_marker = b.lines.back().map(|l| l.time);
+        }
         let Some(b) = self.buffers.get(self.active) else {
             return;
         };
@@ -368,6 +401,16 @@ impl App {
                     let _ = writeln!(f, "{network} {dir} {}", msg.to_wire());
                 }
             }
+            Event::React {
+                network,
+                buffer,
+                msgid,
+                nick,
+                emoji,
+            } => {
+                let i = self.buffer_index(network, Some(&buffer));
+                self.buffers[i].add_reaction(msgid, emoji, nick);
+            }
             Event::Topic { .. } | Event::Members { .. } => {}
         }
     }
@@ -414,6 +457,7 @@ impl App {
             // Keep the viewport steady while reading back.
             buf.scroll += 1;
         }
+        buf.rev += 1;
         buf.lines.push_back(line);
         if buf.lines.len() > BUFFER_CAP {
             buf.lines.pop_front();
@@ -430,6 +474,7 @@ impl App {
         text: &str,
     ) {
         let idx = self.buffer_index(network, buffer.as_deref());
+        self.buffers[idx].rev += 1;
         self.buffers[idx].lines.push_back(Line {
             network,
             buffer,
@@ -441,6 +486,7 @@ impl App {
             own: false,
             highlight: false,
             history: false,
+            reply_to: None,
         });
     }
 
@@ -493,6 +539,40 @@ impl App {
         );
     }
 
+    /// React to a message in the active buffer.
+    pub fn react(&mut self, msgid: &str, emoji: &str) {
+        let Some(b) = self.current() else { return };
+        let Some(target) = b.name.clone() else { return };
+        let net = b.network;
+        self.engine.send(
+            net,
+            Command::React {
+                target,
+                msgid: msgid.to_string(),
+                emoji: emoji.to_string(),
+            },
+        );
+    }
+
+    /// Send `text` in the active buffer as a reply to `msgid`. Commands are run normally.
+    pub fn reply(&mut self, msgid: &str, text: &str) {
+        if text.starts_with('/') {
+            self.submit_text(text);
+            return;
+        }
+        let Some(b) = self.current() else { return };
+        let Some(target) = b.name.clone() else { return };
+        let net = b.network;
+        self.engine.send(
+            net,
+            Command::Reply {
+                target,
+                msgid: msgid.to_string(),
+                text: crate::emoji::expand(text),
+            },
+        );
+    }
+
     /// Nick and command completion candidates for `prefix`.
     pub fn completions(&self, prefix: &str) -> Vec<String> {
         let lower = prefix.to_lowercase();
@@ -502,6 +582,11 @@ impl App {
                 .filter(|(n, _)| n.starts_with(&cmd.to_lowercase()))
                 .map(|(n, _)| format!("/{n}"))
                 .collect();
+        }
+        if let Some(code) = prefix.strip_prefix(':')
+            && !code.is_empty()
+        {
+            return crate::emoji::complete(&code.to_lowercase());
         }
         let Some(b) = self.current() else {
             return Vec::new();
@@ -572,6 +657,13 @@ impl App {
                 expanded = murk_config::expand_alias(alias, args);
                 text = &expanded;
             }
+        }
+        // Raw protocol lines go out verbatim; everything else gets :shortcode: emoji.
+        let lower = text.to_ascii_lowercase();
+        let emojied;
+        if !(lower.starts_with("/quote ") || lower.starts_with("/raw ")) {
+            emojied = crate::emoji::expand(text);
+            text = &emojied;
         }
 
         let (net, target) = match self.current() {
@@ -672,6 +764,7 @@ impl App {
             Action::Clear => {
                 if let Some(b) = self.buffers.get_mut(self.active) {
                     b.lines.clear();
+                    b.rev += 1;
                     b.scroll = 0;
                 }
             }

@@ -143,6 +143,10 @@ impl Session {
             own,
             highlight,
             history,
+            reply_to: m
+                .tag("+draft/reply")
+                .or_else(|| m.tag("+reply"))
+                .map(str::to_string),
         }
     }
 
@@ -372,6 +376,18 @@ impl Session {
             }
             "PRIVMSG" | "NOTICE" => self.on_message(m, &src, &mut out),
             "TAGMSG" => {
+                let react = m.tag("+draft/react").or_else(|| m.tag("+react"));
+                let reply = m.tag("+draft/reply").or_else(|| m.tag("+reply"));
+                if let (Some(emoji), Some(msgid)) = (react, reply) {
+                    let buffer = self.buffer_for(p(0), &src);
+                    out.events.push(Event::React {
+                        network: self.id,
+                        buffer,
+                        msgid: msgid.to_string(),
+                        nick: src.clone(),
+                        emoji: emoji.to_string(),
+                    });
+                }
                 if let Some(state) = m.tag("+typing") {
                     let buffer = self.buffer_for(p(0), &src);
                     out.events.push(Event::Typing {
@@ -835,6 +851,45 @@ impl Session {
                 out.send.push(msg("QUIT", &[&r]));
             }
             Command::Connect => {}
+            Command::React {
+                target,
+                msgid,
+                emoji,
+            } => {
+                out.send.push(
+                    msg("TAGMSG", &[&target])
+                        .with_tag("+draft/react", Some(emoji.clone()))
+                        .with_tag("+draft/reply", Some(msgid.clone())),
+                );
+                // Shown at once: not every server echoes tag-only messages, and
+                // a later echo is a no-op because reactions dedupe per nick.
+                {
+                    out.events.push(Event::React {
+                        network: self.id,
+                        buffer: target,
+                        msgid,
+                        nick: self.state.nick.clone(),
+                        emoji,
+                    });
+                }
+            }
+            Command::Reply {
+                target,
+                msgid,
+                text,
+            } => {
+                for chunk in split_message(&text, self.max_text_len(&target).saturating_sub(64)) {
+                    out.send.push(
+                        msg("PRIVMSG", &[&target, &chunk])
+                            .with_tag("+draft/reply", Some(msgid.clone())),
+                    );
+                    if !self.state.has_cap("echo-message") {
+                        let mut l = self.local_line(&target, LineKind::Privmsg, &chunk);
+                        l.reply_to = Some(msgid.clone());
+                        out.events.push(Event::Line(l));
+                    }
+                }
+            }
         }
         out
     }
@@ -851,6 +906,7 @@ impl Session {
             own: true,
             highlight: false,
             history: false,
+            reply_to: None,
         }
     }
 
