@@ -1,0 +1,19 @@
+[package]
+name = "murk-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+base64 = "0.23.1"
+murk-proto = { version = "0.1.0", path = "../murk-proto" }
+rustls-native-certs = "0.8.5"
+rustls-pki-types = "1.16.0"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12", "logging"] }
+tracing = "0.1.44"
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
