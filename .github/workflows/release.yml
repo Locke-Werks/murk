@@ -173,6 +173,11 @@ jobs:
           if ls "$QT_ROOT_DIR/plugins/platforms/libqwayland-generic.so" > /dev/null 2>&1; then
             modules="$modules;waylandclient"
             export EXTRA_PLATFORM_PLUGINS="libqwayland-generic.so;libqwayland-egl.so"
+            # The platform plugin alone is not enough: without the graphics
+            # integration Qt cannot make an OpenGL context under Wayland and
+            # aborts at startup (0.1.1 did exactly that).
+            export EXTRA_QT_PLUGINS="wayland-graphics-integration-client;wayland-shell-integration;wayland-decoration-client"
+            wayland=1
           fi
           export EXTRA_QT_MODULES="$modules"
           ./linuxdeploy-x86_64.AppImage --appdir AppDir \
@@ -183,6 +188,10 @@ jobs:
           # v0.1.0 shipped without a playback backend and nothing noticed. Fail here.
           ls AppDir/usr/plugins/multimedia/*.so
           ls AppDir/usr/plugins/platforms/
+          if [ -n "${wayland:-}" ]; then
+            ls AppDir/usr/plugins/wayland-graphics-integration-client/*.so
+            ls AppDir/usr/plugins/wayland-shell-integration/*.so
+          fi
           mv Murk*.AppImage "Murk-$ver-x86_64.AppImage"
           cp target/release/murk "murk-$ver-linux-x86_64"
 
