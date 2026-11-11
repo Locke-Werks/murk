@@ -122,6 +122,12 @@ mod imp {
             let _ = sc.Add(&HSTRING::from(word));
         });
     }
+
+    /// Release the COM checker while COM is still up. Left to thread-local
+    /// teardown, the release can run after COM shuts down and hang the exit.
+    pub fn shutdown() {
+        CHECKER.with(|c| c.borrow_mut().take());
+    }
 }
 
 #[cfg(not(windows))]
@@ -192,9 +198,11 @@ mod imp {
     pub fn add(word: &str) {
         ADDED.with(|a| a.borrow_mut().push(word.to_string()));
     }
+
+    pub fn shutdown() {}
 }
 
-pub use imp::{add, check, suggest};
+pub use imp::{add, check, shutdown, suggest};
 
 /// Words with their UTF-16 offsets: letters plus inner apostrophes.
 #[cfg_attr(windows, allow(dead_code))]

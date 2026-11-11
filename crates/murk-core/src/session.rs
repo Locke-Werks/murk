@@ -569,6 +569,23 @@ impl Session {
         let server_notice = matches!(m.prefix, Some(Prefix::Server(_)) | None) || target == "*";
 
         if let Some(c) = ctcp::parse(text) {
+            // Our own offers come back to us through echo-message; they are not offers to us.
+            if c.command == "DCC" && self.state.is_me(src) {
+                return;
+            }
+            if c.command == "DCC" && !notice {
+                match murk_proto::dcc::parse(c.args) {
+                    Some(offer) => out.events.push(Event::DccOffer {
+                        network: self.id,
+                        from: src.to_string(),
+                        offer,
+                    }),
+                    None => {
+                        self.server_line(out, m, format!("Unsupported DCC from {src}: {}", c.args))
+                    }
+                }
+                return;
+            }
             if c.command != "ACTION" {
                 if !notice
                     && !self.state.is_me(src)

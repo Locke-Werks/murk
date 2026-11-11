@@ -97,6 +97,12 @@ pub enum Event {
         nick: String,
         active: bool,
     },
+    /// Someone offered a DCC file or chat. Never accepted without the user.
+    DccOffer {
+        network: NetworkId,
+        from: String,
+        offer: murk_proto::dcc::DccOffer,
+    },
     /// An emoji reaction (`+draft/react`) to an earlier message.
     React {
         network: NetworkId,

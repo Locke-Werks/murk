@@ -130,6 +130,46 @@ ApplicationWindow {
 
             Confetti { id: confetti; anchors.fill: parent; z: 50 }
 
+            TransferTray {
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.rightMargin: 22
+                anchors.bottomMargin: 100
+                z: 30
+            }
+
+            // Drop a file into a private conversation to send it over DCC.
+            DropArea {
+                id: drop
+                anchors.fill: parent
+                keys: ["text/uri-list"]
+                onDropped: function (ev) {
+                    if (Core.ctl.kind !== "query") {
+                        toast.show("Files go to people", "Open a private conversation, then drop the file there.", -1)
+                        return
+                    }
+                    for (const u of ev.urls)
+                        Core.ctl.dccSend(Core.ctl.title, u.toString())
+                }
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    visible: drop.containsDrag
+                    radius: 18
+                    color: Theme.alpha(Theme.accent, 0.08)
+                    border.width: 2
+                    border.color: Theme.accent
+                    Text {
+                        anchors.centerIn: parent
+                        text: Core.ctl.kind === "query" ? "Drop to send to " + Core.ctl.title : "Open a private conversation to send files"
+                        color: Theme.accent
+                        font.family: Theme.displayFont
+                        font.pixelSize: 22
+                        font.weight: Font.DemiBold
+                    }
+                }
+            }
+
             Toast {
                 id: toast
                 anchors.right: parent.right

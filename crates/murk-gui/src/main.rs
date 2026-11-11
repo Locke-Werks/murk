@@ -52,7 +52,10 @@ fn main() {
     if let Some(engine) = engine.as_mut() {
         engine.load(&QUrl::from("qrc:/qt/qml/Murk/qml/Main.qml"));
     }
-    if let Some(app) = app.as_mut() {
-        app.exec();
-    }
+    let code = app.as_mut().map(|app| app.exec()).unwrap_or(1);
+    // QML objects first, then COM objects, while Qt and COM are both still alive.
+    drop(engine);
+    spell::shutdown();
+    drop(app);
+    std::process::exit(code);
 }

@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  QT_VERSION: 6.8.3
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+      - name: Linux packages
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config libxkbcommon-x11-0
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Lint
+        shell: bash
+        run: |
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        shell: bash
+        run: |
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          cargo test --workspace

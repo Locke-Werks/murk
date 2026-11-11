@@ -2,6 +2,7 @@
 
 pub mod casemap;
 pub mod ctcp;
+pub mod dcc;
 pub mod format;
 pub mod isupport;
 pub mod message;

@@ -72,7 +72,7 @@ Item {
                     Layout.fillWidth: true
                     spacing: 1
                     RowLayout {
-                        Layout.alignment: Qt.AlignLeft
+                        Layout.fillWidth: true
                         spacing: 10
                         Text {
                             text: Core.ctl.kind === "channel" ? Core.ctl.title.replace(/^#+/, "") : Core.ctl.title
@@ -96,6 +96,7 @@ Item {
                             font.family: Theme.uiFont
                             font.pixelSize: 12
                         }
+                        Item { Layout.fillWidth: true }
                     }
                     Text {
                         Layout.fillWidth: true

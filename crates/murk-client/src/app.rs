@@ -135,6 +135,7 @@ pub struct App {
     pending_focus: Vec<(NetworkId, String)>,
     /// Lua scripts from the config directory's `scripts` folder.
     pub scripts: Option<murk_script::ScriptHost>,
+    pub transfers: crate::dcc::Transfers,
 }
 
 impl App {
@@ -148,6 +149,7 @@ impl App {
     pub fn bare(engine: Engine, store: Option<Store>, config: Config) -> Self {
         App {
             scripts: None,
+            transfers: Default::default(),
             engine,
             store,
             config,
@@ -491,6 +493,31 @@ impl App {
                 let i = self.buffer_index(network, Some(&buffer));
                 self.buffers[i].add_reaction(msgid, emoji, nick);
             }
+            Event::DccOffer {
+                network,
+                from,
+                offer,
+            } => {
+                let size = offer.size.map(crate::dcc::human_size);
+                match self.transfers.offered(network, &from, offer) {
+                    Ok(id) => {
+                        let t = self.transfers.list.iter().find(|t| t.id == id).unwrap();
+                        let text = format!(
+                            "{from} offers {} ({}). /dcc get {id} to download, /dcc decline {id} to refuse.",
+                            t.filename,
+                            size.unwrap_or_else(|| "size unknown".into())
+                        );
+                        let i = self.buffer_index(network, Some(&from));
+                        self.local_line(network, Some(from), LineKind::Server, &text);
+                        if i != self.active {
+                            self.buffers[i].highlighted = true;
+                            self.buffers[i].unread += 1;
+                        }
+                        self.bell = true;
+                    }
+                    Err(e) => self.local_line(network, Some(from), LineKind::Server, &e),
+                }
+            }
             Event::Topic { .. } | Event::Members { .. } => {}
         }
     }
@@ -665,6 +692,103 @@ impl App {
         }
     }
 
+    /// Accept a DCC offer (the newest pending one when `id` is None).
+    pub fn dcc_accept(&mut self, id: Option<u32>) {
+        let id = id.or_else(|| {
+            self.transfers
+                .list
+                .iter()
+                .rev()
+                .find(|t| t.state == crate::dcc::State::Offered)
+                .map(|t| t.id)
+        });
+        let Some(id) = id else {
+            return self.info("No pending DCC offers");
+        };
+        match self.transfers.accept(id, &self.engine) {
+            Ok(p) => self.info(&format!("Downloading to {}", p.display())),
+            Err(e) => self.info(&e),
+        }
+    }
+
+    pub fn dcc_decline(&mut self, id: u32) {
+        if !self.transfers.decline(id) {
+            self.info("No such pending offer");
+        }
+    }
+
+    /// Offer a file to a nick on the active buffer's network.
+    pub fn dcc_send(&mut self, nick: &str, path: &str) {
+        let Some(net) = self.current().map(|b| b.network) else {
+            return self.info("Not connected");
+        };
+        let path = std::path::PathBuf::from(path.trim().trim_matches('"'));
+        match self.transfers.send(net, nick, path, &self.engine) {
+            Ok(_) => self.info(&format!(
+                "Offered to {nick}. They need to reach this machine directly: on the same network, or with a forwarded port."
+            )),
+            Err(e) => self.info(&e),
+        }
+    }
+
+    fn dcc_command(&mut self, args: &str) {
+        let mut it = args.split_whitespace();
+        match it.next().unwrap_or("list") {
+            "get" | "accept" => self.dcc_accept(it.next().and_then(|s| s.parse().ok())),
+            "decline" | "reject" => match it.next().and_then(|s| s.parse().ok()) {
+                Some(id) => self.dcc_decline(id),
+                None => self.info("Usage: /dcc decline <id>"),
+            },
+            "send" => {
+                let nick = it.next().unwrap_or("").to_string();
+                let path = args.splitn(3, ' ').nth(2).unwrap_or("").to_string();
+                if nick.is_empty() || path.is_empty() {
+                    return self.info("Usage: /dcc send <nick> <path>");
+                }
+                self.dcc_send(&nick, &path);
+            }
+            "list" => {
+                if self.transfers.list.is_empty() {
+                    return self.info("No DCC transfers. /dcc send <nick> <path> offers a file.");
+                }
+                let lines: Vec<String> = self
+                    .transfers
+                    .list
+                    .iter()
+                    .map(|t| {
+                        let dir = if t.outgoing { "to" } else { "from" };
+                        let size = t
+                            .size
+                            .map(crate::dcc::human_size)
+                            .unwrap_or_else(|| "?".into());
+                        let state = match &t.state {
+                            crate::dcc::State::Offered => "offered: /dcc get to accept".to_string(),
+                            crate::dcc::State::Waiting => "waiting for them to connect".into(),
+                            crate::dcc::State::Active => format!(
+                                "{} of {size}, {}/s",
+                                crate::dcc::human_size(t.done),
+                                crate::dcc::human_size(t.rate as u64)
+                            ),
+                            crate::dcc::State::Done => "done".into(),
+                            crate::dcc::State::Failed(e) => format!("failed: {e}"),
+                            crate::dcc::State::Declined => "declined".into(),
+                        };
+                        format!(
+                            "  #{} {} {dir} {} ({size}): {state}",
+                            t.id, t.filename, t.peer
+                        )
+                    })
+                    .collect();
+                for l in lines {
+                    self.info(&l);
+                }
+            }
+            other => self.info(&format!(
+                "Unknown /dcc action '{other}': use list, get, decline or send"
+            )),
+        }
+    }
+
     fn script_command(&mut self, args: &str) {
         match args {
             "reload" => {
@@ -776,6 +900,9 @@ impl App {
 
     pub fn tick(&mut self) {
         let now = Instant::now();
+        for (_, msg) in self.transfers.poll() {
+            self.info(&msg);
+        }
         if let Some(s) = &self.scripts {
             for e in s.tick(now) {
                 self.set_status(format!("Script timer failed: {e}"));
@@ -983,6 +1110,10 @@ impl App {
             let cmd = cmd.to_lowercase();
             if cmd == "script" || cmd == "scripts" {
                 self.script_command(args.trim());
+                return;
+            }
+            if cmd == "dcc" {
+                self.dcc_command(args.trim());
                 return;
             }
             if cmd == "react" || cmd == "reply" {

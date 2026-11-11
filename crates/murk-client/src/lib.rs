@@ -2,6 +2,7 @@
 //! dispatch and the input editor. Frontends own only drawing and input mapping.
 
 pub mod app;
+pub mod dcc;
 pub mod editor;
 pub mod emoji;
 

@@ -25,6 +25,7 @@ pub mod qobject {
         #[qproperty(QString, kind)]
         #[qproperty(QString, settings)]
         #[qproperty(bool, ready)]
+        #[qproperty(QString, transfers)]
         type Controller = super::ControllerRust;
 
         /// The whole active buffer changed: a JSON array of line objects.
@@ -95,6 +96,16 @@ pub mod qobject {
 
         #[qinvokable]
         fn quick_reactions(self: &Controller) -> QString;
+
+        #[qinvokable]
+        fn dcc_accept(self: Pin<&mut Controller>, id: i32);
+
+        #[qinvokable]
+        fn dcc_decline(self: Pin<&mut Controller>, id: i32);
+
+        /// Offer a local file (path or file:// URL) to `nick`.
+        #[qinvokable]
+        fn dcc_send(self: Pin<&mut Controller>, nick: &QString, file: &QString);
 
         /// Misspelled ranges in `text` as JSON `[[start, length], ...]` in UTF-16 units.
         #[qinvokable]
@@ -182,6 +193,7 @@ pub struct ControllerRust {
     kind: QString,
     settings: QString,
     ready: bool,
+    transfers: QString,
     app: Option<App>,
     path: PathBuf,
     /// What the view currently shows, to send appends instead of full resets.
@@ -274,6 +286,26 @@ fn stored_json(hits: &[murk_store::Stored], query: Option<&str>) -> serde_json::
         })
         .collect();
     v.into()
+}
+
+/// Undo URL percent-encoding (file URLs from drag and drop and file dialogs).
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%'
+            && i + 2 < b.len()
+            && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16)
+        {
+            out.push(v);
+            i += 3;
+            continue;
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn settings_json(app: &App) -> serde_json::Value {
@@ -597,8 +629,41 @@ impl qobject::Controller {
             .as_ref()
             .map(|(s, _)| s.clone())
             .unwrap_or_default();
+        let transfers: Vec<_> = app
+            .transfers
+            .list
+            .iter()
+            .map(|t| {
+                use murk_client::dcc::{State, human_size};
+                let (state, error) = match &t.state {
+                    State::Offered => ("offered", String::new()),
+                    State::Waiting => ("waiting", String::new()),
+                    State::Active => ("active", String::new()),
+                    State::Done => ("done", String::new()),
+                    State::Failed(e) => ("failed", e.clone()),
+                    State::Declined => ("declined", String::new()),
+                };
+                serde_json::json!({
+                    "id": t.id,
+                    "peer": t.peer,
+                    "file": t.filename,
+                    "outgoing": t.outgoing,
+                    "state": state,
+                    "error": error,
+                    "progress": t.size.filter(|s| *s > 0).map(|s| t.done as f64 / s as f64).unwrap_or(0.0),
+                    "sizeText": t.size.map(human_size).unwrap_or_else(|| "unknown size".into()),
+                    "doneText": human_size(t.done),
+                    "rateText": format!("{}/s", human_size(t.rate as u64)),
+                    "path": t.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+                })
+            })
+            .collect();
+        let transfers = json_str(&transfers.into());
 
         let mut this = self.as_mut();
+        if *this.transfers() != transfers {
+            this.as_mut().set_transfers(transfers);
+        }
         this.as_mut().rust_mut().get_mut().shown = shown;
         if *this.buffers() != buffers {
             this.as_mut().set_buffers(buffers);
@@ -736,6 +801,27 @@ impl qobject::Controller {
 
     pub fn quick_reactions(&self) -> QString {
         json_str(&murk_client::emoji::QUICK_REACTIONS.into())
+    }
+
+    pub fn dcc_accept(self: Pin<&mut Self>, id: i32) {
+        self.with_app(|a| a.dcc_accept(Some(id as u32)));
+    }
+
+    pub fn dcc_decline(self: Pin<&mut Self>, id: i32) {
+        self.with_app(|a| a.dcc_decline(id as u32));
+    }
+
+    pub fn dcc_send(self: Pin<&mut Self>, nick: &QString, file: &QString) {
+        let nick = nick.to_string();
+        let file = file.to_string();
+        // QML hands over file:///C:/x on Windows and file:///home/x elsewhere.
+        let path = match file.strip_prefix("file:///") {
+            Some(p) if cfg!(windows) => p.to_string(),
+            Some(p) => format!("/{p}"),
+            None => file,
+        };
+        let path = percent_decode(&path);
+        self.with_app(|a| a.dcc_send(&nick, &path));
     }
 
     pub fn misspelled(&self, text: &QString) -> QString {

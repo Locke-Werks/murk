@@ -1,0 +1,84 @@
+# Forge installer for Murk. Built in CI by .github/workflows/release.yml with
+# Forge v0.4.1; the payload is the staged Qt deployment under stage/.
+
+[product]
+name         = "Murk"
+version      = "0.1.0"
+publisher    = "Locke Werks"
+description  = "An IRC client for the desktop and the terminal."
+copyright    = "Copyright (c) 2026 Locke Werks"
+url          = "https://github.com/Locke-Werks/murk"
+icon         = "assets/murk.ico"
+# Stable across versions: upgrade detection keys off it.
+upgrade_code = "4c1e7a52-93d8-4f0b-b6a1-2d9e8f3c5a17"
+# No version component, so taskbar pins and toast notifications survive upgrades.
+aumid        = "LockeWerks.Murk"
+
+[install]
+scope     = "machine"
+dir       = "{ProgramFiles}\\Murk"
+elevation = "required"
+
+[ui]
+license_text = """
+Murk is free software: you can redistribute it and/or modify it under the terms
+of the GNU General Public License as published by the Free Software Foundation,
+either version 3 of the License, or (at your option) any later version.
+
+Murk is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+The full license is installed as LICENSE next to the program, and is at
+https://www.gnu.org/licenses/gpl-3.0.html.
+
+Murk includes Qt, used under the GNU Lesser General Public License v3.
+"""
+
+[[options]]
+id      = "desktop_shortcut"
+label   = "Put a shortcut on the desktop"
+default = false
+
+[[options]]
+id      = "terminal_on_path"
+label   = "Add the terminal client (murk) to PATH"
+detail  = "Lets you start the terminal client by typing murk in any console."
+default = true
+
+[[preflight]]
+type = "os_build"
+min  = 17763
+fail = "Windows 10 version 1809 or later is required."
+
+[[preflight]]
+type  = "free_disk_space"
+bytes = 300000000
+fail  = "At least 300 MB of free space is required."
+
+[[preflight]]
+type = "process_not_running"
+name = "murk-gui.exe"
+restart_manager = true
+fail = "Close Murk before installing."
+
+[[actions]]
+type   = "shortcut"
+target = "{InstallDir}\\murk-gui.exe"
+where  = "common_programs"
+name   = "Murk"
+
+[[actions]]
+type   = "shortcut"
+target = "{InstallDir}\\murk-gui.exe"
+where  = "desktop"
+name   = "Murk"
+when   = "desktop_shortcut"
+
+[[actions]]
+type  = "path_append"
+value = "{InstallDir}"
+when  = "terminal_on_path"
+
+[[actions]]
+type = "arp"

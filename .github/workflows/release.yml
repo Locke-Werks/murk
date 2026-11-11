@@ -1,0 +1,197 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+env:
+  # Pinned: a Forge release cannot change what this job produces. v0.4.1 knows
+  # every key installer.toml uses ([[options]], when, path_append).
+  FORGE_VERSION: v0.4.1
+  QT_VERSION: 6.8.3
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $env:QMAKE = "$env:QT_ROOT_DIR\bin\qmake.exe"
+          cargo build --release -p murk-gui -p murk-tui
+
+      - name: Test
+        shell: pwsh
+        run: |
+          $env:QMAKE = "$env:QT_ROOT_DIR\bin\qmake.exe"
+          cargo test --release --workspace
+
+      # Everything under stage/ lands on the user's disk byte for byte.
+      - name: Stage payload
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path stage | Out-Null
+          Copy-Item target/release/murk-gui.exe, target/release/murk.exe, LICENSE stage/
+          & "$env:QT_ROOT_DIR\bin\windeployqt.exe" --release --no-translations `
+            --qmldir crates/murk-gui/qml stage/murk-gui.exe
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
+
+      # Forge extracts payload files verbatim, so they are signed before forging.
+      - name: Sign the payload
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://eus.codesigning.azure.net
+          trusted-signing-account-name: specterpoint
+          certificate-profile-name: specterpoint
+          files-folder: stage
+          files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Fetch Forge
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download $env:FORGE_VERSION --repo Locke-Werks/Forge `
+            --pattern '*.exe' --dir tools
+          foreach ($name in 'lwforge.exe', 'lwstub.exe') {
+            $sig = Get-AuthenticodeSignature "tools/$name"
+            "$name : $($sig.Status)"
+            if ($sig.Status -ne 'Valid') { throw "tools/$name is $($sig.Status)" }
+          }
+
+      - name: Forge the installer
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart('v')
+          (Get-Content installer.toml) -replace '^version\s*=.*', "version      = `"$ver`"" |
+            Set-Content installer.toml
+          ./tools/lwforge.exe build `
+            --config installer.toml `
+            --payload stage `
+            --stub tools/lwstub.exe `
+            --out "dist/Murk-$ver-Setup.exe"
+          if ($LASTEXITCODE -ne 0) { throw "lwforge failed" }
+
+      - name: Sign the installer
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://eus.codesigning.azure.net
+          trusted-signing-account-name: specterpoint
+          certificate-profile-name: specterpoint
+          files-folder: dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Verify
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist/*.exe | Select-Object -First 1
+          $sig = Get-AuthenticodeSignature $setup
+          "installer: $($sig.Status)  $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') { throw "installer is $($sig.Status)" }
+          ./tools/lwforge.exe inspect $setup
+          if ($LASTEXITCODE -ne 0) { throw "the signed installer cannot read its own container" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*.exe
+
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2 libxkbcommon-x11-0 libxcb-cursor0 libdbus-1-dev pkg-config
+
+      - name: Build and test
+        run: |
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          cargo build --release -p murk-gui -p murk-tui
+          cargo test --release --workspace
+
+      - name: AppImage
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy*.AppImage
+          mkdir -p AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/512x512/apps
+          cp assets/murk.png AppDir/usr/share/icons/hicolor/512x512/apps/murk.png
+          cat > AppDir/usr/share/applications/murk.desktop <<'DESKTOP'
+          [Desktop Entry]
+          Type=Application
+          Name=Murk
+          Comment=IRC client
+          Exec=murk-gui
+          Icon=murk
+          Categories=Network;Chat;IRCClient;
+          DESKTOP
+          sed -i 's/^ *//' AppDir/usr/share/applications/murk.desktop
+          export QMAKE="$QT_ROOT_DIR/bin/qmake" QML_SOURCES_PATHS=crates/murk-gui/qml
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir \
+            --executable target/release/murk-gui --executable target/release/murk \
+            --desktop-file AppDir/usr/share/applications/murk.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/512x512/apps/murk.png \
+            --plugin qt --output appimage
+          mv Murk*.AppImage "Murk-$ver-x86_64.AppImage"
+          cp target/release/murk "murk-$ver-linux-x86_64"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            Murk-*.AppImage
+            murk-*-linux-x86_64
+
+  publish:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "Murk ${GITHUB_REF_NAME#v}" --generate-notes \
+            out/windows/* out/linux/*

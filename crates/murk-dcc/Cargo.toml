@@ -1,0 +1,13 @@
+[package]
+name = "murk-dcc"
+description = "DCC file transfers for Murk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+tokio = { version = "1.54.1", features = ["net", "fs", "io-util", "time", "sync", "rt"] }
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros"] }

@@ -43,6 +43,10 @@ pub const HELP: &[(&str, &str)] = &[
     ("me", "/me <action>"),
     ("react", "/react <emoji>: react to the last message"),
     ("reply", "/reply <text>: reply to the last message"),
+    (
+        "dcc",
+        "/dcc [list | get [id] | decline <id> | send <nick> <path>]",
+    ),
     ("notice", "/notice <target> <text>"),
     ("nick", "/nick <newnick>"),
     ("topic", "/topic [new topic]"),
