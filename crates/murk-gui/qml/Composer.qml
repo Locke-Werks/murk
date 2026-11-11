@@ -144,7 +144,97 @@ Rectangle {
                     bottomPadding: 13
                     leftPadding: 6
                     background: null
-                    onTextChanged: if (text.length && !text.startsWith("/")) Core.ctl.edited(text)
+                    onTextChanged: {
+                        if (text.length && !text.startsWith("/"))
+                            Core.ctl.edited(text)
+                        spellTimer.restart()
+                    }
+                    onWidthChanged: spellTimer.restart()
+
+                    // Spell check: ranges come from the OS checker, minus nicks, URLs and commands.
+                    property var typos: []
+                    Timer {
+                        id: spellTimer
+                        interval: 350
+                        onTriggered: input.typos = input.text.length ? JSON.parse(Core.ctl.misspelled(input.text)) : []
+                    }
+                    Repeater {
+                        model: input.typos
+                        Canvas {
+                            required property var modelData
+                            readonly property rect a: input.positionToRectangle(modelData[0])
+                            readonly property rect b: input.positionToRectangle(modelData[0] + modelData[1])
+                            // Words that wrap across lines get underlined on their first line only.
+                            x: a.x
+                            y: a.y + a.height - 3
+                            width: Math.max(4, (b.y === a.y ? b.x : input.width - input.rightPadding) - a.x)
+                            height: 4
+                            onWidthChanged: requestPaint()
+                            onPaint: {
+                                const ctx = getContext("2d")
+                                ctx.reset()
+                                ctx.strokeStyle = Theme.bad
+                                ctx.lineWidth = 1.3
+                                ctx.beginPath()
+                                for (let x = 0; x <= width; x += 2)
+                                    ctx[x === 0 ? "moveTo" : "lineTo"](x, (x / 2) % 2 === 0 ? 3 : 1)
+                                ctx.stroke()
+                            }
+                        }
+                    }
+
+                    // Right-click a flagged word for suggestions.
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: function (ev) {
+                            const pos = input.positionAt(ev.position.x, ev.position.y)
+                            for (const r of input.typos) {
+                                if (pos >= r[0] && pos <= r[0] + r[1]) {
+                                    spellMenu.range = r
+                                    spellMenu.word = input.text.substr(r[0], r[1])
+                                    spellMenu.items = JSON.parse(Core.ctl.suggestions(spellMenu.word))
+                                    spellMenu.popup()
+                                    return
+                                }
+                            }
+                        }
+                    }
+                    Menu {
+                        id: spellMenu
+                        property var range: [0, 0]
+                        property string word: ""
+                        property var items: []
+                        background: Rectangle { implicitWidth: 200; radius: 10; color: Theme.raised; border.color: Theme.line }
+                        Repeater {
+                            model: spellMenu.items
+                            MenuItem {
+                                required property string modelData
+                                text: modelData
+                                contentItem: Text { text: parent.text; color: Theme.text; font.family: Theme.uiFont; font.pixelSize: 14; font.weight: Font.DemiBold }
+                                background: Rectangle { radius: 6; color: parent.highlighted ? Theme.alpha(Theme.accent, 0.18) : "transparent" }
+                                onTriggered: {
+                                    const r = spellMenu.range
+                                    input.remove(r[0], r[0] + r[1])
+                                    input.insert(r[0], modelData)
+                                    input.cursorPosition = r[0] + modelData.length
+                                }
+                            }
+                        }
+                        MenuItem {
+                            enabled: false
+                            visible: spellMenu.items.length === 0
+                            height: visible ? implicitHeight : 0
+                            contentItem: Text { text: "No suggestions"; color: Theme.faint; font.family: Theme.uiFont; font.pixelSize: 13 }
+                            background: Item {}
+                        }
+                        MenuSeparator { contentItem: Rectangle { implicitHeight: 1; color: Theme.line } }
+                        MenuItem {
+                            text: "Add '" + spellMenu.word + "' to dictionary"
+                            contentItem: Text { text: parent.text; color: Theme.sub; font.family: Theme.uiFont; font.pixelSize: 13 }
+                            background: Rectangle { radius: 6; color: parent.highlighted ? Theme.hover : "transparent" }
+                            onTriggered: { Core.ctl.learnWord(spellMenu.word); spellTimer.restart() }
+                        }
+                    }
 
                     Keys.onPressed: function (e) {
                         const plain = !(e.modifiers & (Qt.ShiftModifier | Qt.ControlModifier | Qt.AltModifier))

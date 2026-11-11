@@ -5,6 +5,7 @@
 mod bridge;
 mod html;
 mod model;
+mod spell;
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
 use std::sync::OnceLock;

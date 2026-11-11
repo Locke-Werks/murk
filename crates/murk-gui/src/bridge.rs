@@ -96,6 +96,18 @@ pub mod qobject {
         #[qinvokable]
         fn quick_reactions(self: &Controller) -> QString;
 
+        /// Misspelled ranges in `text` as JSON `[[start, length], ...]` in UTF-16 units.
+        #[qinvokable]
+        fn misspelled(self: &Controller, text: &QString) -> QString;
+
+        /// Spelling suggestions for one word: JSON array.
+        #[qinvokable]
+        fn suggestions(self: &Controller, word: &QString) -> QString;
+
+        /// Add a word to the user's dictionary.
+        #[qinvokable]
+        fn learn_word(self: &Controller, word: &QString);
+
         /// Full-text search of the log: JSON array of hits, newest first.
         #[qinvokable]
         fn search(self: &Controller, query: &QString) -> QString;
@@ -724,6 +736,42 @@ impl qobject::Controller {
 
     pub fn quick_reactions(&self) -> QString {
         json_str(&murk_client::emoji::QUICK_REACTIONS.into())
+    }
+
+    pub fn misspelled(&self, text: &QString) -> QString {
+        let text = text.to_string();
+        if text.starts_with('/') && !text.to_lowercase().starts_with("/me ") {
+            return qs("[]");
+        }
+        // Nicks in the current channel are never typos.
+        let nicks: Vec<String> = self
+            .app
+            .as_ref()
+            .and_then(|a| {
+                let b = a.current()?;
+                let name = b.name.clone()?;
+                a.engine.with_state(b.network, |s| {
+                    s.sorted_members(&name)
+                        .into_iter()
+                        .map(|m| m.nick)
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
+        let ranges: Vec<_> = crate::spell::check(&text)
+            .into_iter()
+            .filter(|&(s, l)| !crate::spell::ignorable(&text, s, l, &nicks))
+            .map(|(s, l)| serde_json::json!([s, l]))
+            .collect();
+        json_str(&ranges.into())
+    }
+
+    pub fn suggestions(&self, word: &QString) -> QString {
+        json_str(&crate::spell::suggest(&word.to_string()).into())
+    }
+
+    pub fn learn_word(&self, word: &QString) {
+        crate::spell::add(&word.to_string());
     }
 
     pub fn search(&self, query: &QString) -> QString {

@@ -444,6 +444,14 @@ impl App {
                 nick,
                 active,
             } => {
+                // Servers echo our own typing notices back; we know when we are typing.
+                if self
+                    .networks
+                    .get(&network)
+                    .is_some_and(|n| n.nick.eq_ignore_ascii_case(&nick))
+                {
+                    return;
+                }
                 let i = self.buffer_index(network, Some(&buffer));
                 if active {
                     self.buffers[i].typing.insert(nick, Instant::now());
