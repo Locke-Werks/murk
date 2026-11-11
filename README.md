@@ -48,44 +48,20 @@ themes and settings.
 
 ## Building
 
+Rust stable, a C/C++ compiler, and Qt 6.8 or newer for the desktop client:
+
 ```
-# Rust stable and Qt 6.8
 QMAKE=/path/to/Qt/6.8.3/<kit>/bin/qmake cargo build --release
 ```
 
-This produces `target/release/murk-gui` and `target/release/murk`. Tagged
-releases build a signed Windows installer and a Linux AppImage in CI.
+This produces `target/release/murk-gui` and `target/release/murk`. The terminal
+client alone needs no Qt: `cargo build --release -p murk-tui`.
 
-### macOS
-
-There are no macOS release builds, and macOS is not tested in CI. It builds
-from source with the same toolchain:
-
-```
-xcode-select --install                     # Apple's compiler and linker
-curl https://sh.rustup.rs -sSf | sh        # Rust stable
-brew install qt                            # Qt 6.8 or later
-QMAKE="$(brew --prefix qt)/bin/qmake" cargo build --release
-```
-
-The terminal client needs nothing beyond Rust: `cargo build --release -p murk-tui`.
-
-To run the desktop client as an app rather than from a terminal, wrap it into a
-bundle with Qt's deploy tool:
-
-```
-mkdir -p Murk.app/Contents/MacOS
-cp target/release/murk-gui Murk.app/Contents/MacOS/
-"$(brew --prefix qt)/bin/macdeployqt" Murk.app -qmldir=crates/murk-gui/qml
-```
-
-A bundle you build yourself runs on your own Mac. Giving it to someone else
-needs a Developer ID signature and notarization, or Gatekeeper refuses to open
-it.
-
-Spell checking uses Hunspell dictionaries. Put `en_US.aff` and `en_US.dic` (or
-your locale's pair) in `~/Library/Spelling`, or install them with Homebrew.
-Without one the client runs normally with spell checking off.
+[docs/BUILDING.md](docs/BUILDING.md) covers Windows, Linux and macOS from a
+clean machine: installing the compilers, Rust and Qt, building, running from
+the build tree, and packaging. macOS builds from source but is untested and has
+no release builds. Tagged releases build a signed Windows installer and a Linux
+AppImage in CI.
 
 ## Using it
 
