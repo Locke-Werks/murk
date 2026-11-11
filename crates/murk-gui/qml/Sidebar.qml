@@ -225,11 +225,11 @@ Rectangle {
                                  : !row.modelData.joined || row.modelData.muted ? Theme.faint
                                  : row.modelData.unread > 0 ? Theme.text : Theme.sub
                         }
-                        Text {
+                        IconGlyph {
                             visible: row.modelData.muted
-                            text: "🔕"
-                            font.pixelSize: 11
-                            opacity: 0.6
+                            kind: "bell-off"
+                            color: Theme.faint
+                            size: 12
                         }
                         // Typing dots.
                         Row {
@@ -376,8 +376,14 @@ Rectangle {
                     }
                 }
                 IconButton {
-                    glyph: "🔔"
+                    glyph: ""
                     tip: "Mentions  (Ctrl+Shift+M)"
+                    IconGlyph {
+                        anchors.centerIn: parent
+                        kind: "bell"
+                        color: Core.unseenMentions > 0 ? Theme.hl : Theme.sub
+                        size: 15
+                    }
                     active: Core.unseenMentions > 0
                     onClicked: root.openMentions()
                     Rectangle {

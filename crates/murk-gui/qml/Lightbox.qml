@@ -218,7 +218,7 @@ Popup {
                 Rectangle {
                     width: 40; height: 40; radius: 20
                     color: Qt.rgba(1, 1, 1, 0.12)
-                    Text { anchors.centerIn: parent; text: sound.muted ? "🔇" : "🔊"; font.pixelSize: 15 }
+                    IconGlyph { anchors.centerIn: parent; kind: sound.muted ? "speaker-off" : "speaker"; color: "#eee"; size: 16 }
                     TapHandler { longPressThreshold: 0; onTapped: sound.muted = !sound.muted }
                 }
             }

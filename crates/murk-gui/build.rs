@@ -20,6 +20,7 @@ const COMPONENTS: &[&str] = &[
     "qml/SmoothWheel.qml",
     "qml/Lightbox.qml",
     "qml/PlayGlyph.qml",
+    "qml/IconGlyph.qml",
     "qml/IconButton.qml",
     "qml/Confetti.qml",
     "qml/SearchPanel.qml",

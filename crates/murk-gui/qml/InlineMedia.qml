@@ -135,7 +135,7 @@ Rectangle {
         width: 30; height: 30; radius: 15
         color: Theme.alpha("#000", 0.55)
         z: 2
-        Text { anchors.centerIn: parent; text: sound.muted ? "🔇" : "🔊"; font.pixelSize: 13 }
+        IconGlyph { anchors.centerIn: parent; kind: sound.muted ? "speaker-off" : "speaker"; color: "white"; size: 14 }
         TapHandler { longPressThreshold: 0; onTapped: sound.muted = !sound.muted }
     }
 

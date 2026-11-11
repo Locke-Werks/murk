@@ -2362,7 +2362,7 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
 name = "murk-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dirs",
  "murk-config",
@@ -2377,7 +2377,7 @@ dependencies = [
 
 [[package]]
 name = "murk-config"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dirs",
  "keyring",
@@ -2390,7 +2390,7 @@ dependencies = [
 
 [[package]]
 name = "murk-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.23.1",
  "murk-proto",
@@ -2404,14 +2404,14 @@ dependencies = [
 
 [[package]]
 name = "murk-dcc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "murk-files"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -2428,7 +2428,7 @@ dependencies = [
 
 [[package]]
 name = "murk-gui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arboard",
  "chrono",
@@ -2453,7 +2453,7 @@ dependencies = [
 
 [[package]]
 name = "murk-media"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures-util",
  "reqwest",
@@ -2465,18 +2465,18 @@ dependencies = [
 
 [[package]]
 name = "murk-proto"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "murk-script"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mlua",
 ]
 
 [[package]]
 name = "murk-store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "murk-core",
  "rusqlite",
@@ -2485,7 +2485,7 @@ dependencies = [
 
 [[package]]
 name = "murk-tui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "crossterm",
