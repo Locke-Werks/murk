@@ -157,7 +157,7 @@ impl Editor {
         line
     }
 
-    fn set(&mut self, s: String) {
+    pub fn set(&mut self, s: String) {
         self.cursor = s.len();
         self.text = s;
         self.touched();

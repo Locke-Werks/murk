@@ -552,6 +552,11 @@ impl App {
 
     pub fn submit(&mut self) {
         let text = self.editor.take();
+        self.submit_text(&text);
+    }
+
+    /// Run text one command or message per line, bypassing the editor and its history.
+    pub fn submit_text(&mut self, text: &str) {
         for line in text.split('\n') {
             self.run_line(line);
         }

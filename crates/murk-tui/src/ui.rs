@@ -1,6 +1,6 @@
 //! Drawing the terminal UI.
 
-use crate::app::App;
+use murk_client::App;
 use murk_core::{ConnState, Line as IrcLine, LineKind};
 use murk_proto::format::{self, Color as IrcColor};
 use ratatui::Frame;

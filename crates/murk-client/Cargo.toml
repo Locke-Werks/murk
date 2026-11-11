@@ -1,0 +1,13 @@
+[package]
+name = "murk-client"
+description = "Frontend-independent client state shared by the Murk terminal and desktop clients"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+murk-config = { version = "0.1.0", path = "../murk-config" }
+murk-core = { version = "0.1.0", path = "../murk-core" }
+murk-store = { version = "0.1.0", path = "../murk-store" }
+unicode-width = "0.2.3"

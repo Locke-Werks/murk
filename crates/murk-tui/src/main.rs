@@ -1,16 +1,14 @@
 //! `murk`: the terminal IRC client.
 
-mod app;
-mod editor;
 mod ui;
 
-use app::App;
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
     Event as TermEvent, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
 };
 use crossterm::execute;
 use futures::StreamExt;
+use murk_client::App;
 use murk_config::Config;
 use murk_core::Engine;
 use std::io::Write;

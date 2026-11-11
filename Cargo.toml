@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/murk-config","crates/murk-core","crates/murk-proto", "crates/murk-store", "crates/murk-tui"]
+members = ["crates/murk-config","crates/murk-core","crates/murk-proto", "crates/murk-store", "crates/murk-tui", "crates/murk-client", "crates/murk-gui"]
 
 [workspace.package]
 version = "0.1.0"

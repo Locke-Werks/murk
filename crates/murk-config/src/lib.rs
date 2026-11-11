@@ -171,7 +171,11 @@ pub fn config_dir() -> PathBuf {
         .join("murk")
 }
 
+/// Where logs live. `MURK_DATA_DIR` overrides it, for test runs and portable installs.
 pub fn data_dir() -> PathBuf {
+    if let Some(d) = std::env::var_os("MURK_DATA_DIR") {
+        return PathBuf::from(d);
+    }
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("murk")

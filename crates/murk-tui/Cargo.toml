@@ -10,6 +10,7 @@ authors.workspace = true
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 futures = "0.3.34"
+murk-client = { version = "0.1.0", path = "../murk-client" }
 murk-config = { version = "0.1.0", path = "../murk-config" }
 murk-core = { version = "0.1.0", path = "../murk-core" }
 murk-proto = { version = "0.1.0", path = "../murk-proto" }
