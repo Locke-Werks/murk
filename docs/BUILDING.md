@@ -22,7 +22,8 @@ three beyond a C compiler.
 | Git | any | fetching the source |
 
 The desktop client links the Qt modules Core, Gui, Qml, Quick and
-QuickControls2. A default Qt install includes all of them.
+QuickControls2, and loads Qt Multimedia at runtime to play video and audio
+inline. Multimedia is an add-on module: the install steps below include it.
 
 The build finds Qt through `qmake`. Point the `QMAKE` environment variable at
 the `qmake` of the Qt you want, or put that Qt's `bin` directory first on
@@ -59,12 +60,12 @@ two do not link together.
 ### 3. Qt
 
 Either the [Qt Online Installer](https://www.qt.io/download-qt-installer-oss)
-(free account; select Qt 6.8.x, component **MSVC 2022 64-bit**), or without an
+(free account; select Qt 6.8.x, component **MSVC 2022 64-bit**, and under Additional Libraries **Qt Multimedia**), or without an
 account through `aqtinstall`, which is what CI uses:
 
 ```
 pip install aqtinstall
-aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 --outputdir C:\Qt
+aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 -m qtmultimedia --outputdir C:\Qt
 ```
 
 Either way you end up with `C:\Qt\6.8.3\msvc2022_64\bin\qmake.exe`.
@@ -162,13 +163,13 @@ Distribution Rust packages are often too old for edition 2024; use rustup.
 Murk needs Qt 6.8 or newer. Check what your distribution ships:
 
 - Fedora 41 and newer, Arch, openSUSE Tumbleweed: new enough. Install the
-  base and declarative packages (`qt6-qtbase-devel qt6-qtdeclarative-devel` on
-  Fedora, `qt6-base qt6-declarative` on Arch).
+  base and declarative packages (`qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtmultimedia-devel` on
+  Fedora, `qt6-base qt6-declarative qt6-multimedia` on Arch).
 - Ubuntu 24.04 and Debian 12: too old (Qt 6.4). Use `aqtinstall`:
 
 ```
 pip install aqtinstall
-aqt install-qt linux desktop 6.8.3 linux_gcc_64 --outputdir ~/Qt
+aqt install-qt linux desktop 6.8.3 linux_gcc_64 -m qtmultimedia --outputdir ~/Qt
 ```
 
 ### 4. Build
@@ -223,7 +224,7 @@ brew install qt
 ```
 
 Homebrew's `qt` is Qt 6 and current. If it is ever behind 6.8, use
-`aqt install-qt mac desktop 6.8.3 clang_64 --outputdir ~/Qt` instead.
+`aqt install-qt mac desktop 6.8.3 clang_64 -m qtmultimedia --outputdir ~/Qt` instead.
 
 ### 4. Build
 

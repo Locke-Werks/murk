@@ -180,6 +180,18 @@ pub struct Config {
     /// Raw `/alias name = expansion` entries; `$1`, `$2-`, `$*` expand arguments.
     pub aliases: std::collections::BTreeMap<String, String>,
     pub ignore: Vec<String>,
+    pub upload: Upload,
+}
+
+/// Where dropped and pasted files go. A server that advertises FILEHOST is used
+/// first; this is the fallback for networks that do not.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Upload {
+    /// The upload endpoint, e.g. `https://files.example.com/upload`.
+    pub url: Option<String>,
+    /// Bearer token for `url`, normally `{ keyring = "files" }`.
+    pub token: Option<Secret>,
 }
 
 pub fn config_dir() -> PathBuf {

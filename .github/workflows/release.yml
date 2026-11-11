@@ -24,6 +24,7 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
+          modules: qtmultimedia
           arch: win64_msvc2022_64
           cache: true
 
@@ -132,6 +133,7 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
+          modules: qtmultimedia
           cache: true
 
       - name: System packages

@@ -262,9 +262,24 @@ Item {
                             readonly property var p: { Core.previewTick; return Core.preview(modelData) }
                             readonly property bool isImage: !!p && p.kind === "image"
                             readonly property bool isCard: !!p && (p.kind === "card" || p.kind === "video")
-                            width: Math.min(body.width, isImage ? 460 : 520)
-                            height: isImage ? imgBox.height : isCard ? card.height : 0
+                            readonly property bool isPlayable: !!p && (p.kind === "movie" || p.kind === "audio")
+                            width: Math.min(body.width, isImage || isPlayable ? 460 : 520)
+                            height: isImage ? imgBox.height : isCard ? card.height : isPlayable && player.item ? player.item.height : 0
                             visible: height > 0
+
+                            // Direct video or audio file: played in place.
+                            Loader {
+                                id: player
+                                active: pv.isPlayable
+                                width: pv.width
+                                sourceComponent: InlineMedia {
+                                    url: pv.modelData
+                                    video: pv.p.kind === "movie"
+                                    title: pv.p.title
+                                    site: pv.p.site
+                                    width: pv.width
+                                }
+                            }
 
                             // Direct image.
                             Rectangle {

@@ -16,6 +16,7 @@ const COMPONENTS: &[&str] = &[
     "qml/Welcome.qml",
     "qml/Toast.qml",
     "qml/ToastStack.qml",
+    "qml/InlineMedia.qml",
     "qml/IconButton.qml",
     "qml/Confetti.qml",
     "qml/SearchPanel.qml",

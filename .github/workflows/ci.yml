@@ -23,6 +23,7 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
+          modules: qtmultimedia
           cache: true
       - name: Linux packages
         if: runner.os == 'Linux'

@@ -187,12 +187,24 @@ ApplicationWindow {
                 id: drop
                 anchors.fill: parent
                 keys: ["text/uri-list"]
+                // Images, video and audio go to the upload host and appear inline for
+                // everyone. Anything else can only travel by DCC, to one person.
+                readonly property bool canShare: chat.composer.uploadReady
                 onDropped: function (ev) {
+                    const media = [], other = []
+                    for (const u of ev.urls)
+                        (canShare && chat.composer.isMedia(u) ? media : other).push(u)
+                    if (media.length)
+                        chat.composer.uploadFiles(media)
+                    if (!other.length)
+                        return
                     if (Core.ctl.kind !== "query") {
-                        toast.show("Files go to people", "Open a private conversation, then drop the file there.", -1)
+                        toast.show(canShare ? "Only media is shared in channels" : "Files go to people",
+                                   canShare ? "Images, video and audio upload here. Send other files to one person from a private conversation."
+                                            : "Open a private conversation, then drop the file there.", -1)
                         return
                     }
-                    for (const u of ev.urls)
+                    for (const u of other)
                         Core.ctl.dccSend(Core.ctl.title, u.toString())
                 }
                 Rectangle {
@@ -205,7 +217,8 @@ ApplicationWindow {
                     border.color: Theme.accent
                     Text {
                         anchors.centerIn: parent
-                        text: Core.ctl.kind === "query" ? "Drop to send to " + Core.ctl.title : "Open a private conversation to send files"
+                        text: drop.canShare ? "Drop to share" + (Core.ctl.kind === "query" ? " with " + Core.ctl.title : Core.ctl.kind === "channel" ? " in " + Core.ctl.title : "")
+                            : Core.ctl.kind === "query" ? "Drop to send to " + Core.ctl.title : "Open a private conversation to send files"
                         color: Theme.accent
                         font.family: Theme.displayFont
                         font.pixelSize: 22

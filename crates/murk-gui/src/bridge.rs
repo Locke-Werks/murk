@@ -48,6 +48,15 @@ pub mod qobject {
         #[qsignal]
         fn preview_ready(self: Pin<&mut Controller>, url: QString, preview: QString);
 
+        /// An upload moved: `fraction` is 0.0 to 1.0.
+        #[qsignal]
+        fn upload_progress(self: Pin<&mut Controller>, id: i32, fraction: f64);
+
+        /// An upload ended: `url` on success, otherwise `error`. `id` is -1 when
+        /// it could not start at all.
+        #[qsignal]
+        fn upload_finished(self: Pin<&mut Controller>, id: i32, url: QString, error: QString);
+
         /// A LIST finished: JSON `[{name, users, topic}]`, busiest first.
         #[qsignal]
         fn channel_list(self: Pin<&mut Controller>, channels: QString);
@@ -155,6 +164,11 @@ pub mod qobject {
         #[qinvokable]
         fn request_preview(self: Pin<&mut Controller>, url: &QString);
 
+        /// Upload a local file (path or file:// URL) to the configured host.
+        /// Returns a job id; progress and the result arrive as signals.
+        #[qinvokable]
+        fn upload_file(self: Pin<&mut Controller>, file: &QString) -> i32;
+
         /// Slash commands with usage: JSON `[{name, usage}]`.
         #[qinvokable]
         fn commands(self: &Controller) -> QString;
@@ -221,6 +235,7 @@ pub struct ControllerRust {
     /// msgids whose reactions changed since the last refresh.
     dirty: Vec<String>,
     previewer: Option<murk_media::Previewer>,
+    next_upload: i32,
 }
 
 #[derive(Default, PartialEq, Clone)]
@@ -362,6 +377,16 @@ fn pulse(lines: &std::collections::VecDeque<murk_core::Line>) -> Vec<u8> {
         .collect()
 }
 
+/// QML hands over file:///C:/x on Windows and file:///home/x elsewhere.
+fn local_path(file: &str) -> String {
+    let path = match file.strip_prefix("file:///") {
+        Some(p) if cfg!(windows) => p.to_string(),
+        Some(p) => format!("/{p}"),
+        None => file.to_string(),
+    };
+    percent_decode(&path)
+}
+
 fn settings_json(app: &App) -> serde_json::Value {
     let ui = &app.config.ui;
     serde_json::json!({
@@ -373,6 +398,7 @@ fn settings_json(app: &App) -> serde_json::Value {
         "highlights": ui.highlights,
         "inlineMedia": ui.inline_media,
         "notifyDesktop": ui.notify_desktop,
+        "uploadReady": app.config.upload.url.as_ref().is_some_and(|u| !u.trim().is_empty()),
         "friends": app.friends().into_iter()
             .map(|(nick, nets)| serde_json::json!({ "nick": nick, "online": nets }))
             .collect::<Vec<_>>(),
@@ -987,15 +1013,59 @@ impl qobject::Controller {
 
     pub fn dcc_send(self: Pin<&mut Self>, nick: &QString, file: &QString) {
         let nick = nick.to_string();
-        let file = file.to_string();
-        // QML hands over file:///C:/x on Windows and file:///home/x elsewhere.
-        let path = match file.strip_prefix("file:///") {
-            Some(p) if cfg!(windows) => p.to_string(),
-            Some(p) => format!("/{p}"),
-            None => file,
-        };
-        let path = percent_decode(&path);
+        let path = local_path(&file.to_string());
         self.with_app(|a| a.dcc_send(&nick, &path));
+    }
+
+    pub fn upload_file(mut self: Pin<&mut Self>, file: &QString) -> i32 {
+        let path = std::path::PathBuf::from(local_path(&file.to_string()));
+        let Some(app) = self.app.as_ref() else {
+            return -1;
+        };
+        let Some(endpoint) = app.config.upload.url.clone() else {
+            let qt = self.qt_thread();
+            let _ = qt.queue(|c| {
+                c.upload_finished(
+                    -1,
+                    QString::default(),
+                    qs("No upload host is set. Add [upload] url and token to the config."),
+                )
+            });
+            return -1;
+        };
+        let auth = match app.config.upload.token.as_ref().map(|t| t.resolve()) {
+            Some(Ok(t)) => murk_media::upload::Auth::Bearer(t),
+            Some(Err(e)) => {
+                let msg = format!("Could not read the upload token: {e}");
+                let qt = self.qt_thread();
+                let _ = qt.queue(move |c| c.upload_finished(-1, QString::default(), qs(&msg)));
+                return -1;
+            }
+            None => murk_media::upload::Auth::None,
+        };
+        let id = {
+            let r = self.as_mut().rust_mut().get_mut();
+            r.next_upload += 1;
+            r.next_upload
+        };
+        let qt = self.qt_thread();
+        let qt_progress = self.qt_thread();
+        crate::runtime().spawn(async move {
+            // Coalesce progress to whole percents so the UI thread is not flooded.
+            let last = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(u64::MAX));
+            let result = murk_media::upload::upload(&endpoint, auth, &path, move |sent, total| {
+                let pct = sent * 100 / total.max(1);
+                if last.swap(pct, std::sync::atomic::Ordering::Relaxed) != pct {
+                    let _ = qt_progress.queue(move |c| c.upload_progress(id, pct as f64 / 100.0));
+                }
+            })
+            .await;
+            let _ = qt.queue(move |c| match result {
+                Ok(url) => c.upload_finished(id, qs(&url), QString::default()),
+                Err(e) => c.upload_finished(id, QString::default(), qs(&e)),
+            });
+        });
+        id
     }
 
     pub fn misspelled(&self, text: &QString) -> QString {

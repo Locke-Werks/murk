@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import Murk
 
 // The message box: reply banner, slash-command hints, emoji, multi-line input.
@@ -22,6 +23,56 @@ Rectangle {
         input.forceActiveFocus()
     }
     function focusInput() { input.forceActiveFocus() }
+
+    // Files on their way to the upload host. Each finished one drops its link into
+    // the message, so a caption can go with it before Enter.
+    ListModel { id: uploads }
+    readonly property bool uploadReady: Core.settings.uploadReady === true
+    readonly property var mediaPattern: /\.(png|jpe?g|gif|webp|avif|heic|bmp|mp4|m4v|webm|mov|mkv|mp3|ogg|oga|opus|m4a|wav|flac)$/i
+    function isMedia(url) { return mediaPattern.test(decodeURIComponent(url.toString())) }
+    function uploadFiles(urls) {
+        for (const u of urls) {
+            const s = u.toString()
+            const name = decodeURIComponent(s.split("/").pop())
+            const id = Core.ctl.uploadFile(s)
+            if (id >= 0)
+                uploads.append({ jobId: id, name: name, progress: 0, error: "" })
+        }
+        input.forceActiveFocus()
+    }
+    Connections {
+        target: Core.ctl
+        function onUploadProgress(id, fraction) {
+            for (let i = 0; i < uploads.count; i++)
+                if (uploads.get(i).jobId === id) { uploads.setProperty(i, "progress", fraction); return }
+        }
+        function onUploadFinished(id, url, error) {
+            if (id < 0) {
+                uploads.append({ jobId: -1, name: "", progress: 0, error: error })
+                return
+            }
+            for (let i = 0; i < uploads.count; i++) {
+                if (uploads.get(i).jobId !== id)
+                    continue
+                if (error.length) {
+                    uploads.setProperty(i, "error", error)
+                } else {
+                    uploads.remove(i)
+                    const before = input.text.length && !/\s$/.test(input.text) ? " " : ""
+                    input.insert(input.length, before + url)
+                    input.cursorPosition = input.length
+                }
+                return
+            }
+        }
+    }
+    FileDialog {
+        id: picker
+        title: "Share images, video or audio"
+        fileMode: FileDialog.OpenFiles
+        nameFilters: ["Images, video and audio (*.png *.jpg *.jpeg *.gif *.webp *.avif *.heic *.bmp *.mp4 *.m4v *.webm *.mov *.mkv *.mp3 *.ogg *.opus *.m4a *.wav *.flac)"]
+        onAccepted: root.uploadFiles(selectedFiles)
+    }
 
     // Slash command suggestions for what is typed so far.
     readonly property var hints: {
@@ -154,11 +205,89 @@ Rectangle {
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.line }
         }
 
+        // Uploads in flight: a progress chip each, or the reason one failed.
+        Flow {
+            Layout.fillWidth: true
+            Layout.leftMargin: 12
+            Layout.rightMargin: 12
+            Layout.topMargin: uploads.count ? 10 : 0
+            visible: uploads.count > 0
+            spacing: 8
+            Repeater {
+                model: uploads
+                Rectangle {
+                    id: chip
+                    required property int index
+                    required property string name
+                    required property real progress
+                    required property string error
+                    height: 30
+                    width: Math.min(chipRow.implicitWidth + 24, 420)
+                    radius: 15
+                    clip: true
+                    color: Theme.alpha(error.length ? Theme.bad : Theme.text, 0.07)
+                    border.color: error.length ? Theme.alpha(Theme.bad, 0.6) : Theme.line
+                    // The fill is the progress bar.
+                    Rectangle {
+                        visible: !chip.error.length
+                        width: parent.width * chip.progress
+                        height: parent.height
+                        radius: parent.radius
+                        color: Theme.alpha(Theme.accent, 0.22)
+                        Behavior on width { NumberAnimation { duration: 180 } }
+                    }
+                    Row {
+                        id: chipRow
+                        anchors.verticalCenter: parent.verticalCenter
+                        x: 12
+                        spacing: 8
+                        Text {
+                            text: chip.error.length ? "⚠" : "⇡"
+                            color: chip.error.length ? Theme.bad : Theme.accent
+                            font.pixelSize: 13
+                        }
+                        Text {
+                            text: chip.error.length ? (chip.name.length ? chip.name + ": " : "") + chip.error
+                                                    : chip.name + "  " + Math.round(chip.progress * 100) + "%"
+                            color: chip.error.length ? Theme.bad : Theme.text
+                            font.family: Theme.uiFont
+                            font.pixelSize: 12
+                            elide: Text.ElideMiddle
+                            width: Math.min(implicitWidth, 360)
+                        }
+                    }
+                    ToolTip.visible: chipHover.hovered && chip.error.length > 0
+                    ToolTip.text: "Click to dismiss"
+                    HoverHandler { id: chipHover }
+                    TapHandler {
+                        longPressThreshold: 0
+                        enabled: chip.error.length > 0
+                        onTapped: uploads.remove(chip.index)
+                    }
+                }
+            }
+        }
+
         RowLayout {
             Layout.fillWidth: true
             Layout.leftMargin: 8
             Layout.rightMargin: 8
             spacing: 4
+
+            IconButton {
+                Layout.alignment: Qt.AlignBottom
+                Layout.bottomMargin: 7
+                glyph: "+"
+                tip: root.uploadReady ? "Share images, video or audio (or drop them on the window)"
+                                      : "Sharing files needs an upload host: set [upload] in the config"
+                opacity: root.uploadReady ? 1 : 0.45
+                onClicked: {
+                    if (root.uploadReady)
+                        picker.open()
+                    else
+                        Core.ctl.uploadFile("")
+                }
+            }
 
             IconButton {
                 Layout.alignment: Qt.AlignBottom

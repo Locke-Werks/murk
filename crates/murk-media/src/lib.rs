@@ -14,6 +14,8 @@ use tokio::sync::Mutex;
 
 const MAX_IMAGE: usize = 12 * 1024 * 1024;
 const MAX_HTML: usize = 512 * 1024;
+pub mod upload;
+
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
@@ -92,6 +94,34 @@ impl Previewer {
                 url: url.into(),
                 kind: "image".into(),
                 image: Some(path),
+                ..Default::default()
+            }));
+        }
+        // Direct video and audio play inline from the URL; nothing is downloaded here.
+        if ctype.starts_with("video/") || ctype.starts_with("audio/") {
+            drop(resp);
+            let kind = if ctype.starts_with("video/") {
+                "movie"
+            } else {
+                "audio"
+            };
+            let site = reqwest::Url::parse(url)
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_string))
+                .unwrap_or_default();
+            let title = url
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .split(['?', '#'])
+                .next()
+                .unwrap_or_default()
+                .to_string();
+            return Ok(Some(Preview {
+                url: url.into(),
+                kind: kind.into(),
+                title,
+                site,
                 ..Default::default()
             }));
         }
