@@ -142,6 +142,31 @@ Rectangle {
                         Behavior on height { NumberAnimation { duration: Theme.med; easing.type: Easing.OutCubic } }
                     }
 
+                    // Activity over the last half hour, drawn faintly behind the name.
+                    Row {
+                        visible: !row.modelData.server && !row.modelData.muted && row.modelData.pulse.length > 0
+                        anchors.right: parent.right
+                        anchors.rightMargin: 44
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 6
+                        spacing: 2
+                        opacity: row.modelData.active ? 0.35 : 0.22
+                        Repeater {
+                            model: row.modelData.pulse
+                            Rectangle {
+                                required property int modelData
+                                required property int index
+                                anchors.bottom: parent.bottom
+                                width: 3
+                                radius: 1.5
+                                height: 2 + modelData * 2
+                                color: row.modelData.highlight ? Theme.hl : Theme.accent
+                                opacity: 0.4 + 0.6 * index / 11
+                                Behavior on height { NumberAnimation { duration: Theme.med; easing.type: Easing.OutCubic } }
+                            }
+                        }
+                    }
+
                     HoverHandler { id: hover }
                     TapHandler { onTapped: Core.ctl.switchTo(row.modelData.index) }
                     TapHandler {

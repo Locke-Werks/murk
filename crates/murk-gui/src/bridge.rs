@@ -324,6 +324,33 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Chat volume over the last 30 minutes in 12 bins, oldest first, scaled 0..=8.
+/// Empty when the buffer has been quiet, so idle rooms draw nothing.
+fn pulse(lines: &std::collections::VecDeque<murk_core::Line>) -> Vec<u8> {
+    use murk_core::LineKind;
+    const BINS: usize = 12;
+    const SPAN: u64 = 30 * 60;
+    let now = std::time::SystemTime::now();
+    let mut bins = [0u32; BINS];
+    for l in lines.iter().rev() {
+        let Ok(age) = now.duration_since(l.time) else { continue };
+        let age = age.as_secs();
+        if age >= SPAN {
+            break;
+        }
+        if matches!(l.kind, LineKind::Privmsg | LineKind::Action | LineKind::Notice) {
+            bins[BINS - 1 - (age * BINS as u64 / SPAN) as usize] += 1;
+        }
+    }
+    let max = *bins.iter().max().unwrap_or(&0);
+    if max == 0 {
+        return Vec::new();
+    }
+    // Scale against a floor so a single line does not look like a riot.
+    let top = max.max(6);
+    bins.iter().map(|&n| ((n * 8).div_ceil(top)) as u8).collect()
+}
+
 fn settings_json(app: &App) -> serde_json::Value {
     let ui = &app.config.ui;
     serde_json::json!({
@@ -569,6 +596,7 @@ impl qobject::Controller {
                 "active": i == active,
                 "typing": !b.typing.is_empty(),
                 "muted": app.is_muted(i),
+                "pulse": pulse(&b.lines),
             }));
             last_net = Some(b.network);
         }
