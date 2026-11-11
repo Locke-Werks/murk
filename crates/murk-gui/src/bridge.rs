@@ -66,6 +66,10 @@ pub mod qobject {
         #[qinvokable]
         fn submit(self: Pin<&mut Controller>, text: &QString);
 
+        /// Send text into buffer `index` without switching to it (quick replies).
+        #[qinvokable]
+        fn submit_to(self: Pin<&mut Controller>, index: i32, text: &QString);
+
         #[qinvokable]
         fn reply(self: Pin<&mut Controller>, msgid: &QString, text: &QString);
 
@@ -825,6 +829,14 @@ impl qobject::Controller {
             app.editor.set(text);
             app.submit();
         });
+    }
+
+    pub fn submit_to(self: Pin<&mut Self>, index: i32, text: &QString) {
+        let text = text.to_string();
+        if index < 0 || text.trim().is_empty() {
+            return;
+        }
+        self.with_app(|app| app.submit_to(index as usize, &text));
     }
 
     pub fn reply(self: Pin<&mut Self>, msgid: &QString, text: &QString) {

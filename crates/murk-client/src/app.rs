@@ -1340,6 +1340,20 @@ impl App {
         }
     }
 
+    /// Run text as if typed into buffer `index`, without switching to it.
+    pub fn submit_to(&mut self, index: usize, text: &str) {
+        if index >= self.buffers.len() {
+            return;
+        }
+        let back = self.active;
+        self.active = index;
+        self.submit_text(text);
+        // A command may have closed or added buffers; only restore what still exists.
+        if self.active == index && back < self.buffers.len() {
+            self.active = back;
+        }
+    }
+
     fn run_line(&mut self, text: &str) {
         // Aliases expand before parsing, one level deep.
         let expanded;
