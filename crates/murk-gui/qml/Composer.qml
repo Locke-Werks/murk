@@ -34,10 +34,20 @@ Rectangle {
     property int hintIndex: 0
     onHintsChanged: hintIndex = 0
 
-    function send() {
+    // Lines in the pending text; more than a few needs a yes before it floods a channel.
+    readonly property int lineCount: input.text.replace(/\s+$/, "").split("\n").length
+    property bool confirmMany: false
+    onLineCountChanged: confirmMany = false
+
+    function send(confirmed) {
         const t = input.text.replace(/\s+$/, "")
         if (!t.length)
             return
+        if (lineCount > 3 && !t.startsWith("/") && !confirmed) {
+            confirmMany = true
+            return
+        }
+        confirmMany = false
         if (Core.replyTo)
             Core.ctl.reply(Core.replyTo.msgid, t)
         else
@@ -81,6 +91,41 @@ Rectangle {
                 }
             }
             Rectangle { width: parent.width; height: 1; color: Theme.line }
+        }
+
+        // Paste guard.
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 44
+            visible: root.confirmMany
+            color: Theme.alpha(Theme.warn, 0.1)
+            radius: 14
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 14
+                anchors.rightMargin: 8
+                spacing: 8
+                Text {
+                    Layout.fillWidth: true
+                    text: "This sends " + root.lineCount + " separate messages. Send them all?"
+                    color: Theme.warn
+                    font.family: Theme.uiFont
+                    font.pixelSize: 13
+                    elide: Text.ElideRight
+                }
+                Button {
+                    text: "Cancel"
+                    onClicked: { root.confirmMany = false; input.forceActiveFocus() }
+                    contentItem: Text { text: parent.text; color: Theme.sub; font.family: Theme.uiFont; font.pixelSize: 13; horizontalAlignment: Text.AlignHCenter }
+                    background: Rectangle { radius: 8; color: parent.hovered ? Theme.hover : "transparent"; implicitWidth: 74; implicitHeight: 30 }
+                }
+                Button {
+                    text: "Send " + root.lineCount
+                    onClicked: root.send(true)
+                    contentItem: Text { text: parent.text; color: Theme.bg; font.family: Theme.uiFont; font.pixelSize: 13; font.weight: Font.DemiBold; horizontalAlignment: Text.AlignHCenter }
+                    background: Rectangle { radius: 8; color: Theme.warn; implicitWidth: 84; implicitHeight: 30 }
+                }
+            }
         }
 
         // Replying to.
@@ -243,7 +288,7 @@ Rectangle {
                                 input.text = "/" + root.hints[root.hintIndex].name + " "
                                 input.cursorPosition = input.text.length
                             } else {
-                                root.send()
+                                root.send(root.confirmMany)
                             }
                             e.accepted = true
                         } else if (e.key === Qt.Key_Tab) {

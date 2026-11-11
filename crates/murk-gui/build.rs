@@ -21,6 +21,7 @@ const COMPONENTS: &[&str] = &[
     "qml/TransferTray.qml",
     "qml/ProfileCard.qml",
     "qml/ChannelBrowser.qml",
+    "qml/CheatSheet.qml",
 ];
 
 fn main() {

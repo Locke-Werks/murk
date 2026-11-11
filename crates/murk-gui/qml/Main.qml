@@ -44,7 +44,7 @@ ApplicationWindow {
         // Anything but an editable field (or a message being selected) hands focus back.
         const editable = f && f.cursorPosition !== undefined && f.readOnly !== true
         const selecting = f && f.readOnly === true && f.selectedText && f.selectedText.length > 0
-        if (!editable && !selecting && !palette.opened && !settings.opened && !networkEditor.opened && !emoji.opened && !searchPanel.opened && !profile.opened && !browser.opened)
+        if (!editable && !selecting && !palette.opened && !settings.opened && !networkEditor.opened && !emoji.opened && !searchPanel.opened && !profile.opened && !browser.opened && !cheats.opened)
             Qt.callLater(chat.composer.focusInput)
     }
 
@@ -217,6 +217,8 @@ ApplicationWindow {
     NetworkEditor { id: networkEditor; parent: Overlay.overlay }
     ChannelBrowser { id: browser; parent: Overlay.overlay }
     Shortcut { sequence: "Ctrl+J"; onActivated: browser.open() }
+    CheatSheet { id: cheats; parent: Overlay.overlay }
+    Shortcut { sequences: ["Ctrl+/", "F1"]; onActivated: cheats.open() }
     ProfileCard {
         id: profile
         onMention: function (n) { chat.composer.insert(n + ": ") }
