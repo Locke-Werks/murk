@@ -67,6 +67,25 @@ impl ISupport {
             .map(|v| v.as_deref())
     }
 
+    /// Whether the server relays a client-only tag (`+draft/react` is asked as
+    /// `draft/react`), per CLIENTTAGDENY: `*` denies all, `-name` exempts one.
+    pub fn client_tag_allowed(&self, tag: &str) -> bool {
+        let tag = tag.trim_start_matches('+');
+        let Some(Some(list)) = self.get("CLIENTTAGDENY") else {
+            return true;
+        };
+        let mut allowed = true;
+        for entry in list.split(',') {
+            match entry {
+                "*" => allowed = false,
+                e if e.strip_prefix('-') == Some(tag) => return true,
+                e if e == tag => return false,
+                _ => {}
+            }
+        }
+        allowed
+    }
+
     pub fn is_channel(&self, target: &str) -> bool {
         target
             .chars()
@@ -135,6 +154,19 @@ fn unescape(v: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn client_tag_deny() {
+        let mut i = ISupport::default();
+        assert!(i.client_tag_allowed("+draft/react"));
+        i.apply(["CLIENTTAGDENY=*,-typing,-channel-context"]);
+        assert!(!i.client_tag_allowed("+draft/react"));
+        assert!(i.client_tag_allowed("+typing"));
+        let mut j = ISupport::default();
+        j.apply(["CLIENTTAGDENY=draft/react"]);
+        assert!(!j.client_tag_allowed("draft/react"));
+        assert!(j.client_tag_allowed("draft/reply"));
+    }
 
     #[test]
     fn applies_tokens() {

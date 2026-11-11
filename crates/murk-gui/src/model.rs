@@ -192,9 +192,69 @@ pub fn line(b: &Buffer, i: usize, me: &str) -> Value {
                 && l.time.duration_since(p.time).unwrap_or_default() < GROUP_WINDOW
                 && l.reply_to.is_none()
         });
-    let unread = match (b.read_marker, prev) {
-        (Some(m), Some(p)) => p.time <= m && l.time > m && !l.own,
+    // The divider goes on the first message from someone else after the read marker;
+    // local notes and joins after the marker do not count.
+    let missed = |x: &Line, m: SystemTime| {
+        x.time > m
+            && !x.own
+            && matches!(
+                x.kind,
+                LineKind::Privmsg | LineKind::Action | LineKind::Notice
+            )
+    };
+    let unread = match b.read_marker {
+        Some(m) if i > 0 && missed(l, m) => !b
+            .lines
+            .range(..i)
+            .rev()
+            .take_while(|x| x.time > m)
+            .any(|x| missed(x, m)),
         _ => false,
+    };
+    // What you missed, summarised on the unread divider.
+    let digest = if unread {
+        let mut count = 0;
+        let mut mentions = 0;
+        let mut who: Vec<(String, usize)> = Vec::new();
+        for x in b.lines.range(i..) {
+            if !matches!(x.kind, LineKind::Privmsg | LineKind::Action) || x.own {
+                continue;
+            }
+            count += 1;
+            mentions += x.highlight as usize;
+            let s = x.sender.clone().unwrap_or_default();
+            match who.iter_mut().find(|(n, _)| *n == s) {
+                Some((_, c)) => *c += 1,
+                None => who.push((s, 1)),
+            }
+        }
+        who.sort_by_key(|w| std::cmp::Reverse(w.1));
+        let names: Vec<&str> = who.iter().take(2).map(|(n, _)| n.as_str()).collect();
+        let others = who.len().saturating_sub(2);
+        let from = match (names.len(), others) {
+            (0, _) => String::new(),
+            (1, _) => format!(" from {}", names[0]),
+            (_, 0) => format!(" from {} and {}", names[0], names[1]),
+            (_, n) => format!(
+                " from {}, {} and {n} other{}",
+                names[0],
+                names[1],
+                if n == 1 { "" } else { "s" }
+            ),
+        };
+        let mut s = format!(
+            "{count} new message{}{from}",
+            if count == 1 { "" } else { "s" }
+        );
+        if mentions > 0 {
+            s.push_str(&format!(
+                "  \u{b7}  {mentions} mention{} you",
+                if mentions == 1 { "" } else { "s" }
+            ));
+        }
+        s
+    } else {
+        String::new()
     };
     let sender = l.sender.clone().unwrap_or_default();
     let reply = l.reply_to.as_deref().map(|id| match b.find_msgid(id) {
@@ -252,6 +312,7 @@ pub fn line(b: &Buffer, i: usize, me: &str) -> Value {
         "newDay": new_day,
         "grouped": grouped,
         "unread": unread,
+        "digest": digest,
         "own": l.own,
         "highlight": l.highlight,
         "history": l.history,

@@ -9,6 +9,9 @@ Item {
     property bool showNicks: true
     signal pickReaction(string msgid, Item anchor)
     signal celebrate()
+    // Where the unread divider sits in the model, and its digest, for the jump pill.
+    property int unreadIndex: -1
+    property string unreadDigest: ""
 
     function scrollToEnd() {
         list.stick = true
@@ -19,8 +22,15 @@ Item {
         target: Core.ctl
         function onLinesReset(lines) {
             model.clear()
-            for (const l of JSON.parse(lines))
+            root.unreadIndex = -1
+            root.unreadDigest = ""
+            for (const l of JSON.parse(lines)) {
+                if (l.unread) {
+                    root.unreadIndex = model.count
+                    root.unreadDigest = l.digest
+                }
                 model.append({ j: JSON.stringify(l) })
+            }
             root.scrollToEnd()
             // Delegates settle their heights over a frame; pin to the end once more.
             settle.restart()
@@ -165,6 +175,47 @@ Item {
                 }
 
                 delegate: MessageDelegate {}
+            }
+
+            // Jump up to where you left off, while that is above the view.
+            Rectangle {
+                id: unreadPill
+                readonly property int firstVisible: list.indexAt(10, list.contentY + 10)
+                readonly property bool needed: root.unreadIndex >= 0
+                    && (firstVisible === -1 || firstVisible > root.unreadIndex)
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.top: parent.top
+                anchors.topMargin: 12
+                z: 5
+                visible: opacity > 0
+                opacity: needed ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: Theme.med } }
+                width: pillRow.implicitWidth + 28
+                height: 34
+                radius: 17
+                color: Theme.bad
+                Row {
+                    id: pillRow
+                    anchors.centerIn: parent
+                    spacing: 8
+                    Text { text: "↑"; color: Theme.bg; font.pixelSize: 14; font.weight: Font.Bold }
+                    Text {
+                        text: root.unreadDigest.length ? root.unreadDigest : "Jump to unread"
+                        color: Theme.bg
+                        font.family: Theme.uiFont
+                        font.pixelSize: 13
+                        font.weight: Font.DemiBold
+                    }
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        list.stick = false
+                        list.positionViewAtIndex(root.unreadIndex, ListView.Beginning)
+                        root.unreadIndex = -1
+                    }
+                }
             }
 
             // Jump back to the newest line.

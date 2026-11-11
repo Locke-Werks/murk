@@ -138,6 +138,8 @@ pub struct App {
     pub transfers: crate::dcc::Transfers,
     /// Where settings changed from commands (such as /theme) are saved.
     pub config_path: Option<std::path::PathBuf>,
+    /// Networks we already explained do not relay reactions.
+    told_no_reactions: Vec<NetworkId>,
 }
 
 impl App {
@@ -153,6 +155,7 @@ impl App {
             scripts: None,
             transfers: Default::default(),
             config_path: None,
+            told_no_reactions: Vec::new(),
             engine,
             store,
             config,
@@ -1014,11 +1017,27 @@ impl App {
         true
     }
 
+    /// Whether the network relays a client-only tag to other users.
+    fn relays_tag(&self, net: NetworkId, tag: &str) -> bool {
+        self.engine
+            .with_state(net, |s| {
+                s.has_cap("message-tags") && s.isupport.client_tag_allowed(tag)
+            })
+            .unwrap_or(false)
+    }
+
     /// React to a message in the active buffer.
     pub fn react(&mut self, msgid: &str, emoji: &str) {
         let Some(b) = self.current() else { return };
         let Some(target) = b.name.clone() else { return };
         let net = b.network;
+        if !self.relays_tag(net, "draft/react") && !self.told_no_reactions.contains(&net) {
+            self.told_no_reactions.push(net);
+            self.info(&format!(
+                "{} does not pass reactions between people, so only you will see them here.",
+                self.net_name(net)
+            ));
+        }
         self.engine.send(
             net,
             Command::React {
@@ -1038,6 +1057,24 @@ impl App {
         let Some(b) = self.current() else { return };
         let Some(target) = b.name.clone() else { return };
         let net = b.network;
+        // Without reply tags, fall back to the classic "nick: text" so it still reads as a reply.
+        if !self.relays_tag(net, "draft/reply") {
+            let who = b.find_msgid(msgid).and_then(|l| l.sender.clone());
+            let text = crate::emoji::expand(text);
+            let text = match who {
+                Some(n) if !text.starts_with(&format!("{n}:")) => format!("{n}: {text}"),
+                _ => text,
+            };
+            self.engine.send(
+                net,
+                Command::Say {
+                    target,
+                    text,
+                    action: false,
+                },
+            );
+            return;
+        }
         self.engine.send(
             net,
             Command::Reply {

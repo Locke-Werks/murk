@@ -57,8 +57,27 @@ Item {
         Item {
             visible: root.d.unread
             width: parent.width
-            height: visible ? 26 : 0
+            height: visible ? 34 : 0
             Rectangle { anchors.verticalCenter: parent.verticalCenter; x: 20; width: parent.width - 40; height: 1; color: Theme.bad; opacity: 0.7 }
+            // While you were away: who said how much.
+            Rectangle {
+                visible: root.d.digest.length > 0
+                anchors.centerIn: parent
+                width: digestText.implicitWidth + 24
+                height: 24
+                radius: 12
+                color: Theme.bg
+                border.color: Theme.alpha(Theme.bad, 0.6)
+                Text {
+                    id: digestText
+                    anchors.centerIn: parent
+                    text: root.d.digest
+                    color: Theme.bad
+                    font.family: Theme.uiFont
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                }
+            }
             Rectangle {
                 anchors.right: parent.right
                 anchors.rightMargin: 20
