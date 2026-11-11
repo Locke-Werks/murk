@@ -11,7 +11,9 @@ Item {
     readonly property var d: JSON.parse(j)
     readonly property bool chat: d.kind === "msg" || d.kind === "action" || d.kind === "notice"
     readonly property bool membership: d.kind === "join" || d.kind === "leave" || d.kind === "nick"
-    readonly property bool hidden: membership && Core.settings.showJoinsParts === false
+    // Folded lines are summarised by the last line of their run; keep any divider they carry.
+    readonly property bool hidden: eventHidden && !d.newDay && !d.unread
+    readonly property bool eventHidden: d.folded || (membership && Core.settings.showJoinsParts === false)
     readonly property bool cozy: !Theme.compact
     readonly property color nickColor: Theme.nick(d.color)
     property ListView view: ListView.view
@@ -410,7 +412,7 @@ Item {
 
         // Membership and channel events: small and quiet.
         Item {
-            visible: !root.chat && root.d.kind !== "server" && root.d.kind !== "error"
+            visible: !root.chat && !root.eventHidden && root.d.kind !== "server" && root.d.kind !== "error"
             width: parent.width
             height: visible ? 24 : 0
             Row {
@@ -418,9 +420,9 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 8
                 Text {
-                    text: root.d.kind === "join" ? "→" : root.d.kind === "leave" ? "←"
+                    text: root.d.summary ? "⇅" : root.d.kind === "join" ? "→" : root.d.kind === "leave" ? "←"
                         : root.d.kind === "nick" ? "⇄" : root.d.kind === "topic" ? "✎" : "•"
-                    color: root.d.kind === "join" ? Theme.ok : root.d.kind === "leave" ? Theme.bad : Theme.faint
+                    color: root.d.summary ? Theme.accent : root.d.kind === "join" ? Theme.ok : root.d.kind === "leave" ? Theme.bad : Theme.faint
                     font.pixelSize: 13
                 }
                 Text {

@@ -472,6 +472,14 @@ impl qobject::Controller {
                                     .map(|i| model::line(b, i, me))
                                     .collect::<Vec<_>>(),
                             );
+                            // The line before may have been the end of a membership run that now continues.
+                            if start > 0
+                                && start < b.lines.len()
+                                && model::is_foldable(&b.lines[start - 1])
+                                && model::is_foldable(&b.lines[start])
+                            {
+                                changed.push(((start - 1) as i32, model::line(b, start - 1, me)));
+                            }
                         }
                         _ => reset = Some(all()),
                     }

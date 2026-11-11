@@ -72,6 +72,7 @@ Item {
                     Layout.fillWidth: true
                     spacing: 1
                     RowLayout {
+                        Layout.alignment: Qt.AlignLeft
                         spacing: 10
                         Text {
                             text: Core.ctl.kind === "channel" ? Core.ctl.title.replace(/^#+/, "") : Core.ctl.title
@@ -142,6 +143,8 @@ Item {
                 property bool stick: true
                 property int missed: 0
                 onMovementEnded: { stick = atYEnd; if (stick) missed = 0 }
+                // Previews and reactions grow lines after they land; stay pinned while that happens.
+                onContentHeightChanged: if (stick && !moving) Qt.callLater(positionViewAtEnd)
                 onAtYEndChanged: if (atYEnd) { stick = true; missed = 0 }
                 onAtYBeginningChanged: if (atYBeginning && count > 0 && !stick) Core.ctl.loadOlder()
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded; width: 8 }
