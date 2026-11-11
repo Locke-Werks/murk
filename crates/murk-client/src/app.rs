@@ -140,6 +140,8 @@ pub struct App {
     pub config_path: Option<std::path::PathBuf>,
     /// Networks we already explained do not relay reactions.
     told_no_reactions: Vec<NetworkId>,
+    /// Channels the user parted, closed when the server confirms.
+    closing: Vec<(NetworkId, String)>,
     /// Friends online per network, from MONITOR.
     pub online: HashMap<NetworkId, Vec<String>>,
 }
@@ -158,6 +160,7 @@ impl App {
             transfers: Default::default(),
             config_path: None,
             told_no_reactions: Vec::new(),
+            closing: Vec::new(),
             online: HashMap::new(),
             engine,
             store,
@@ -456,6 +459,11 @@ impl App {
                     "part",
                     &[("network", &name), ("channel", &channel)],
                 );
+                let key = (network, channel.to_ascii_lowercase());
+                if let Some(pos) = self.closing.iter().position(|k| *k == key) {
+                    self.closing.remove(pos);
+                    self.remove_buffer(i);
+                }
             }
             Event::Typing {
                 network,
@@ -1507,6 +1515,13 @@ impl App {
                         );
                         self.last_typing_sent = None;
                     }
+                    // A part the user asked for closes its buffer once the server
+                    // confirms it; a kick or a forced part leaves the buffer to read.
+                    if let Command::Part { channel, .. } = &cmd {
+                        for c in channel.split(',') {
+                            self.closing.push((n, c.to_ascii_lowercase()));
+                        }
+                    }
                     if let Command::Join { channel, .. } = &cmd {
                         for c in channel.split(',') {
                             self.pending_focus.push((n, c.to_string()));
@@ -1618,6 +1633,18 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Drop buffer `i`, keeping the same buffer active when it was a different one.
+    fn remove_buffer(&mut self, i: usize) {
+        if i >= self.buffers.len() {
+            return;
+        }
+        self.buffers.remove(i);
+        if self.active > i {
+            self.active -= 1;
+        }
+        self.active = self.active.min(self.buffers.len().saturating_sub(1));
     }
 
     fn close_current(&mut self) {
