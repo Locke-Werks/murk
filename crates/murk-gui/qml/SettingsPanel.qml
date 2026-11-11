@@ -220,6 +220,13 @@ Popup {
                     background: Rectangle { radius: 10; color: Theme.alpha(Theme.text, 0.06); border.color: hlField.activeFocus ? Theme.accent : "transparent" }
                     onEditingFinished: Core.set("highlights", text.split(","))
                 }
+                Section { text: "WHEN MURK IS IN THE BACKGROUND" }
+                Toggle {
+                    label: "Desktop notifications"
+                    hint: "For mentions and private messages. The taskbar button flashes either way. Muted buffers stay quiet unless you are mentioned."
+                    checked: Core.settings.notifyDesktop !== false
+                    onToggled: on => Core.set("notifyDesktop", on)
+                }
                 Item { Layout.fillHeight: true }
             }
 

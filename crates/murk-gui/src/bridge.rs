@@ -334,6 +334,7 @@ fn settings_json(app: &App) -> serde_json::Value {
         "nicklist": ui.nicklist,
         "highlights": ui.highlights,
         "inlineMedia": ui.inline_media,
+        "notifyDesktop": ui.notify_desktop,
     })
 }
 
@@ -1088,6 +1089,7 @@ impl qobject::Controller {
             ("showJoinsParts", serde_json::Value::Bool(b)) => ui.show_joins_parts = *b,
             ("nicklist", serde_json::Value::Bool(b)) => ui.nicklist = *b,
             ("inlineMedia", serde_json::Value::Bool(b)) => ui.inline_media = *b,
+            ("notifyDesktop", serde_json::Value::Bool(b)) => ui.notify_desktop = *b,
             ("highlights", serde_json::Value::Array(a)) => {
                 ui.highlights = a
                     .iter()

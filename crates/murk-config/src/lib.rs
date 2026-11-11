@@ -145,6 +145,8 @@ pub struct Ui {
     pub inline_media: bool,
     /// Buffers that never count as unread or alert, except for direct mentions: "Network/#chan".
     pub muted: Vec<String>,
+    /// Show a desktop notification for mentions and private messages while unfocused.
+    pub notify_desktop: bool,
 }
 
 impl Default for Ui {
@@ -160,6 +162,7 @@ impl Default for Ui {
             font_size: 11,
             inline_media: true,
             muted: Vec::new(),
+            notify_desktop: true,
         }
     }
 }

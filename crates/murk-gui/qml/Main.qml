@@ -23,7 +23,8 @@ ApplicationWindow {
             if (!(searchPanel.opened && searchPanel.tab === 0))
                 Core.unseenMentions++
             if (!win.active) {
-                Core.ctl.notify(title, text)
+                if (Core.settings.notifyDesktop !== false)
+                    Core.ctl.notify(title, text)
                 win.alert(0)
             } else if (index !== Core.ctl.active) {
                 toast.show(title, text, index)
