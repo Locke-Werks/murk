@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 const USAGE: &str = "Usage: murk [--config <path>] [--no-log] [network...]
+       murk secret set <name>   (stores stdin in the OS keyring)
 
 Starts the terminal client. Networks named on the command line connect at
 startup, in addition to those marked autoconnect in the config.
@@ -49,8 +50,39 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
+fn secret_command(args: &[String]) -> i32 {
+    let (Some("set"), Some(name), None) =
+        (args.first().map(String::as_str), args.get(1), args.get(2))
+    else {
+        eprintln!("Usage: murk secret set <name>   (the value is read from stdin)");
+        return 2;
+    };
+    let mut value = String::new();
+    if std::io::stdin().read_line(&mut value).is_err() || value.trim().is_empty() {
+        eprintln!("murk: no value on stdin");
+        return 1;
+    }
+    match murk_config::Secret::store(name, value.trim()) {
+        Ok(_) => {
+            eprintln!("Stored. Refer to it in the config as {{ keyring = \"{name}\" }}");
+            0
+        }
+        Err(e) => {
+            eprintln!("murk: could not store the secret: {e}");
+            1
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
+    // `murk secret set <name>` stores stdin in the OS keyring, for config entries
+    // written as `{ keyring = "<name>" }`. Reading stdin keeps the value out of
+    // shell history and process listings.
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    if raw.first().map(String::as_str) == Some("secret") {
+        std::process::exit(secret_command(&raw[1..]));
+    }
     let args = match parse_args() {
         Ok(a) => a,
         Err(msg) => {
