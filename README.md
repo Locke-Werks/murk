@@ -59,9 +59,9 @@ client alone needs no Qt: `cargo build --release -p murk-tui`.
 
 [docs/BUILDING.md](docs/BUILDING.md) covers Windows, Linux and macOS from a
 clean machine: installing the compilers, Rust and Qt, building, running from
-the build tree, and packaging. macOS builds from source but is untested and has
-no release builds. Tagged releases build a signed Windows installer and a Linux
-AppImage in CI.
+the build tree, and packaging. Tagged releases build a signed Windows installer,
+a Linux AppImage, and a signed, notarized macOS `.dmg` for Apple Silicon in CI.
+The macOS build has not been run on a Mac yet.
 
 ## Using it
 

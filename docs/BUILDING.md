@@ -199,9 +199,10 @@ checking is off and nothing else changes.
 
 ## macOS
 
-Not tested. No CI job and no release builds exist for macOS, and Murk has never
-been compiled on a Mac. Every dependency supports macOS and these steps should
-work; reports either way are welcome.
+CI builds and tests on macOS (Apple Silicon), and tagged releases include a
+signed, notarized `.dmg`. Nobody has run the app on a Mac yet, so how it looks
+and behaves there is untested; reports are welcome. The steps below are for
+building it yourself.
 
 ### 1. Command line tools and Homebrew
 
