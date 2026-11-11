@@ -1,0 +1,6 @@
+/target
+/build
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
+.reliquary-project

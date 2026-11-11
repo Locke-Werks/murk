@@ -1,0 +1,21 @@
+[package]
+name = "murk-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+murk-proto = { path = "../crates/murk-proto" }
+
+[workspace]
+
+[[bin]]
+name = "parse_message"
+path = "fuzz_targets/parse_message.rs"
+test = false
+doc = false
+bench = false

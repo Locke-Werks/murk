@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["crates/murk-proto"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+authors = ["Locke Werks <archon@lockewerks.com>"]
+
+[workspace.dependencies]
+murk-proto = { path = "crates/murk-proto" }
