@@ -1,5 +1,6 @@
 //! Drawing the terminal UI.
 
+use crate::media::{Entry, Media};
 use murk_client::App;
 use murk_core::{ConnState, Line as IrcLine, LineKind};
 use murk_proto::format::{self, Color as IrcColor};
@@ -271,7 +272,7 @@ fn wrap(spans: Vec<Span<'static>>, width: usize, indent: usize) -> Vec<Line<'sta
     rows.into_iter().map(Line::from).collect()
 }
 
-pub fn draw(f: &mut Frame, app: &mut App, tz_offset: i64) {
+pub fn draw(f: &mut Frame, app: &mut App, media: &mut Media, tz_offset: i64) {
     let theme = &theme_named(&app.config.ui.theme);
     let area = f.area();
     let [main, status, input] = Layout::vertical([
@@ -299,7 +300,7 @@ pub fn draw(f: &mut Frame, app: &mut App, tz_offset: i64) {
     if sidebar > 0 {
         draw_buffers(f, app, side, theme);
     }
-    draw_chat(f, app, chat, theme, tz_offset);
+    draw_chat(f, app, media, chat, theme, tz_offset);
     if show_nicks {
         draw_nicks(f, app, nicks, theme);
     }
@@ -388,10 +389,18 @@ fn draw_buffers(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
     );
 }
 
-fn draw_chat(f: &mut Frame, app: &mut App, area: Rect, theme: &Theme, tz_offset: i64) {
+fn draw_chat(
+    f: &mut Frame,
+    app: &mut App,
+    media: &mut Media,
+    area: Rect,
+    theme: &Theme,
+    tz_offset: i64,
+) {
     let width = area.width.saturating_sub(1) as usize;
     let height = area.height as usize;
     let show_jp = app.config.ui.show_joins_parts;
+    let inline_media = app.config.ui.inline_media;
     let fmt = app.config.ui.timestamp_format.clone();
     let mut want_older = false;
     let Some(buf) = app.buffers.get_mut(app.active) else {
@@ -407,6 +416,8 @@ fn draw_chat(f: &mut Frame, app: &mut App, area: Rect, theme: &Theme, tz_offset:
     // Build rows bottom-up, only as many as needed to fill the view plus the scroll offset.
     let need = height + buf.scroll;
     let mut rows: Vec<Line<'static>> = Vec::new();
+    // For each row, the picture whose top edge sits on it: (url, indent).
+    let mut marks: Vec<Option<(String, u16)>> = Vec::new();
     for (i, l) in buf.lines.iter().enumerate().rev() {
         if !show_jp
             && matches!(
@@ -418,6 +429,7 @@ fn draw_chat(f: &mut Frame, app: &mut App, area: Rect, theme: &Theme, tz_offset:
         }
         // Runs of joins and parts show once, as a summary on the last line of the run.
         let (folded, summary) = murk_client::fold::fold_at(&buf.lines, i);
+        let is_summary = summary.is_some();
         if folded {
             continue;
         }
@@ -443,8 +455,60 @@ fn draw_chat(f: &mut Frame, app: &mut App, area: Rect, theme: &Theme, tz_offset:
                 ));
             }
         }
+        // Pictures sit under their message. Rows are built bottom-up, so they go in
+        // before the text, and the last row pushed is a picture's top edge.
+        if inline_media
+            && !is_summary
+            && matches!(
+                l.kind,
+                LineKind::Privmsg | LineKind::Action | LineKind::Notice
+            )
+        {
+            let text = format::strip(&l.text);
+            for url in crate::media::links(&text).into_iter().rev() {
+                media.request(&url);
+                let pad = Span::raw(" ".repeat(indent));
+                let dim = Style::default().fg(theme.dim);
+                match media.get(&url) {
+                    Some(Entry::Ready { proto, video }) => {
+                        if *video {
+                            let hint = if media.is_playing(&url) {
+                                "\u{25a0} playing  \u{b7}  /play stops"
+                            } else {
+                                "\u{25b6} video  \u{b7}  /play to watch here"
+                            };
+                            rows.push(Line::from(vec![pad.clone(), Span::styled(hint, dim)]));
+                            marks.push(None);
+                        }
+                        let h = proto.size().height;
+                        for _ in 1..h {
+                            rows.push(Line::from(""));
+                            marks.push(None);
+                        }
+                        rows.push(Line::from(""));
+                        marks.push(Some((url.clone(), indent as u16)));
+                    }
+                    Some(Entry::Loading) => {
+                        rows.push(Line::from(vec![
+                            pad,
+                            Span::styled("\u{29d7} loading\u{2026}", dim),
+                        ]));
+                        marks.push(None);
+                    }
+                    Some(Entry::VideoNoPoster) => {
+                        rows.push(Line::from(vec![
+                            pad,
+                            Span::styled("\u{25b6} video  \u{b7}  /play to watch here", dim),
+                        ]));
+                        marks.push(None);
+                    }
+                    _ => {}
+                }
+            }
+        }
         let mut wrapped = wrap(spans, width, indent);
         wrapped.reverse();
+        marks.extend(std::iter::repeat_n(None, wrapped.len()));
         rows.extend(wrapped);
         // A reply shows what it answers on the row above it.
         if let Some(id) = &l.reply_to {
@@ -476,6 +540,7 @@ fn draw_chat(f: &mut Frame, app: &mut App, area: Rect, theme: &Theme, tz_offset:
                 row = vec![Span::styled(text, Style::default().fg(theme.dim))];
             }
             rows.push(Line::from(row));
+            marks.push(None);
         }
         if rows.len() >= need {
             break;
@@ -486,16 +551,42 @@ fn draw_chat(f: &mut Frame, app: &mut App, area: Rect, theme: &Theme, tz_offset:
         buf.scroll = max_scroll;
         want_older = true;
     }
-    let visible: Vec<Line> = rows
-        .into_iter()
-        .skip(buf.scroll)
-        .take(height)
-        .rev()
-        .collect();
-    let pad = height.saturating_sub(visible.len());
+    let scroll = buf.scroll;
+    let visible: Vec<Line> = rows.into_iter().skip(scroll).take(height).rev().collect();
+    let shown = visible.len();
+    let pad = height.saturating_sub(shown);
     let mut lines = vec![Line::from(""); pad];
     lines.extend(visible);
     f.render_widget(Paragraph::new(lines), area);
+
+    // Pictures go on top of their reserved rows, only when wholly on screen:
+    // graphics protocols cannot draw part of an image.
+    media.drawn.clear();
+    for (idx, mark) in marks.iter().enumerate() {
+        let Some((url, indent)) = mark else { continue };
+        let Some(Entry::Ready { proto, .. }) = media.get(url) else {
+            continue;
+        };
+        let h = proto.size().height as usize;
+        let top_idx = idx;
+        let bottom_idx = idx + 1 - h.min(idx + 1);
+        if bottom_idx < scroll || top_idx >= scroll + shown {
+            continue;
+        }
+        let y = pad + (shown - 1 - (top_idx - scroll));
+        let w = proto.size().width.min(area.width.saturating_sub(*indent));
+        let rect = Rect {
+            x: area.x + indent,
+            y: area.y + y as u16,
+            width: w,
+            height: h as u16,
+        };
+        if rect.bottom() > area.bottom() {
+            continue;
+        }
+        f.render_widget(ratatui_image::Image::new(proto), rect);
+        media.drawn.push((url.clone(), rect));
+    }
 
     if want_older {
         app.load_older();

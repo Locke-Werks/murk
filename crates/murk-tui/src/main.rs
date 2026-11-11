@@ -1,5 +1,6 @@
 //! `murk`: the terminal IRC client.
 
+mod media;
 mod ui;
 
 use crossterm::event::{
@@ -157,12 +158,28 @@ async fn run(
     engine: Engine,
     tz_offset: i64,
 ) -> std::io::Result<()> {
+    // Ask the terminal what it can draw before anything else starts reading stdin.
+    let mut media = media::Media::detect();
+    if app.config.ui.inline_media {
+        app.set_status(format!("Inline media: {}", media.protocol_name()));
+    }
     let mut events = engine.subscribe();
     let mut input = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_secs(1));
+    let mut last_drawn: Vec<(String, ratatui::layout::Rect)> = Vec::new();
 
     loop {
-        terminal.draw(|f| ui::draw(f, app, tz_offset))?;
+        terminal.draw(|f| ui::draw(f, app, &mut media, tz_offset))?;
+        // Graphics are not cells: a picture that moved or vanished leaves its old
+        // pixels behind until something paints over them. Repaint everything then.
+        if media.drawn != last_drawn {
+            let moved = last_drawn.iter().any(|old| !media.drawn.contains(old));
+            last_drawn = media.drawn.clone();
+            if moved {
+                terminal.clear()?;
+                terminal.draw(|f| ui::draw(f, app, &mut media, tz_offset))?;
+            }
+        }
         if app.bell {
             app.bell = false;
             let mut out = std::io::stdout();
@@ -207,18 +224,25 @@ async fn run(
                 Err(_) => return Ok(()),
             },
             ev = input.next() => match ev {
-                Some(Ok(e)) => handle_term(app, e),
+                Some(Ok(e)) => handle_term(app, &mut media, e),
                 Some(Err(e)) => return Err(e),
                 None => return Ok(()),
             },
+            Some(update) = media.rx.recv() => {
+                media.apply(update);
+                // Frames arrive in bursts while a video plays; take what is queued.
+                while let Ok(u) = media.rx.try_recv() {
+                    media.apply(u);
+                }
+            }
             _ = tick.tick() => app.tick(),
         }
     }
 }
 
-fn handle_term(app: &mut App, ev: TermEvent) {
+fn handle_term(app: &mut App, media: &mut media::Media, ev: TermEvent) {
     match ev {
-        TermEvent::Key(k) if k.kind != KeyEventKind::Release => handle_key(app, k),
+        TermEvent::Key(k) if k.kind != KeyEventKind::Release => handle_key(app, media, k),
         TermEvent::Paste(s) => {
             // Multi-line pastes become one message per line, sent on Enter.
             app.editor
@@ -237,7 +261,7 @@ fn handle_term(app: &mut App, ev: TermEvent) {
     }
 }
 
-fn handle_key(app: &mut App, k: KeyEvent) {
+fn handle_key(app: &mut App, media: &mut media::Media, k: KeyEvent) {
     let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
     let alt = k.modifiers.contains(KeyModifiers::ALT);
     let page = 10;
@@ -310,6 +334,19 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             app.editor.complete(|_| words);
         }
         KeyCode::Enter => {
+            // `/play` belongs to the terminal: it plays the newest video here, in place.
+            if app.editor.text().trim().eq_ignore_ascii_case("/play") {
+                app.editor.take();
+                let found = app.current().and_then(|b| {
+                    media.newest_video(b.lines.iter().rev().map(|l| l.text.as_str()))
+                });
+                let msg = match found {
+                    Some(url) => media.toggle_play(&url),
+                    None => "No video in this conversation to play".into(),
+                };
+                app.set_status(msg);
+                return;
+            }
             if let Some(b) = app.buffers.get_mut(app.active) {
                 b.scroll = 0;
             }
