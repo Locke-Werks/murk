@@ -1,0 +1,10 @@
+[package]
+name = "murk-script"
+description = "Sandboxed Lua scripting for Murk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+mlua = { version = "0.12.2", features = ["lua54", "vendored"] }

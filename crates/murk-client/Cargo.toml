@@ -9,5 +9,6 @@ authors.workspace = true
 [dependencies]
 murk-config = { version = "0.1.0", path = "../murk-config" }
 murk-core = { version = "0.1.0", path = "../murk-core" }
+murk-script = { version = "0.1.0", path = "../murk-script" }
 murk-store = { version = "0.1.0", path = "../murk-store" }
 unicode-width = "0.2.3"

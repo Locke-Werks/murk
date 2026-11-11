@@ -47,7 +47,11 @@ fn windows_resources(desc: &str, name: &str) {
     let dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let icon = dir.join("../../assets/murk.ico").canonicalize().unwrap();
     // rc.exe wants a plain path, without the \\?\ prefix canonicalize adds on Windows.
-    let icon = icon.display().to_string().replace("\\\\?\\", "").replace('\\', "/");
+    let icon = icon
+        .display()
+        .to_string()
+        .replace("\\\\?\\", "")
+        .replace('\\', "/");
     let rc = std::fs::read_to_string(dir.join("murk.rc"))
         .unwrap()
         .replace("@COMMA@", &parts.join(","))

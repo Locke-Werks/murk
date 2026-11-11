@@ -13,6 +13,36 @@ const BUFFER_CAP: usize = 5000;
 const TYPING_SEND_INTERVAL: Duration = Duration::from_secs(3);
 const TYPING_EXPIRE: Duration = Duration::from_secs(6);
 
+/// Written to the scripts folder on first run. Rename to `.lua` to enable it.
+const EXAMPLE_SCRIPT: &str = r#"-- Murk scripts are Lua 5.4. Every *.lua file in this folder loads at startup;
+-- run /script reload after editing. Rename this file to example.lua to try it.
+--
+-- murk.on(event, fn)        events: message, input, join, part, connect, disconnect
+-- murk.command(name, fn, help)   adds /name; fn receives the argument string
+-- murk.say([target,] text)  murk.me([target,] text)  murk.raw(line)
+-- murk.print(text)          shows text locally, sends nothing
+-- murk.react(msgid, emoji)  murk.run("/join #x")
+-- murk.timer(seconds, fn[, repeat]) returns an id; murk.cancel(id)
+--
+-- A message hook gets m.network, m.buffer, m.nick, m.text, m.kind, m.own,
+-- m.highlight and m.msgid. Return false to hide the line.
+-- An input hook gets the text you typed: return new text, or false to cancel.
+
+murk.command("slap", function(who)
+  murk.me("slaps " .. who .. " around a bit with a large trout")
+end, "/slap <nick>")
+
+murk.command("shrug", function(rest)
+  murk.say((rest ~= "" and rest .. " " or "") .. "\u{AF}\\_(\u{30C4})_/\u{AF}")
+end, "/shrug [text]")
+
+murk.on("message", function(m)
+  if not m.own and m.text:lower():match("^!roll") then
+    murk.say(m.nick .. " rolled a " .. math.random(1, 20))
+  end
+end)
+"#;
+
 pub struct Buffer {
     pub network: NetworkId,
     /// Channel or query name; `None` for the network's server buffer.
@@ -103,11 +133,21 @@ pub struct App {
     raw_log: Option<std::fs::File>,
     /// Channels the user asked to join, focused when the join lands.
     pending_focus: Vec<(NetworkId, String)>,
+    /// Lua scripts from the config directory's `scripts` folder.
+    pub scripts: Option<murk_script::ScriptHost>,
 }
 
 impl App {
     pub fn new(engine: Engine, store: Option<Store>, config: Config) -> Self {
+        let mut app = App::bare(engine, store, config);
+        app.load_scripts();
+        app
+    }
+
+    /// An App without scripts, for tests and embedders that manage scripting themselves.
+    pub fn bare(engine: Engine, store: Option<Store>, config: Config) -> Self {
         App {
+            scripts: None,
             engine,
             store,
             config,
@@ -352,6 +392,16 @@ impl App {
                     }
                 }
                 self.local_line(network, None, LineKind::Server, &text);
+                let name = self.net_name(network);
+                match state {
+                    ConnState::Connected => {
+                        self.script_event(network, "connect", &[("network", &name)])
+                    }
+                    ConnState::Disconnected => {
+                        self.script_event(network, "disconnect", &[("network", &name)])
+                    }
+                    _ => {}
+                }
             }
             Event::OwnNick { network, nick } => {
                 if let Some(n) = self.networks.get_mut(&network) {
@@ -371,10 +421,22 @@ impl App {
                 if requested || on_server_buffer {
                     self.switch(i);
                 }
+                let name = self.net_name(network);
+                self.script_event(
+                    network,
+                    "join",
+                    &[("network", &name), ("channel", &channel)],
+                );
             }
             Event::Parted { network, channel } => {
                 let i = self.buffer_index(network, Some(&channel));
                 self.buffers[i].joined = false;
+                let name = self.net_name(network);
+                self.script_event(
+                    network,
+                    "part",
+                    &[("network", &name), ("channel", &channel)],
+                );
             }
             Event::Typing {
                 network,
@@ -427,6 +489,45 @@ impl App {
             && let Ok(None) = store.insert(&net, &line)
         {
             return;
+        }
+        // Script hooks see live chat only: replayed history must not wake up bots.
+        if !line.history
+            && self.scripts.is_some()
+            && matches!(
+                line.kind,
+                LineKind::Privmsg | LineKind::Notice | LineKind::Action
+            )
+        {
+            let ctx = murk_script::Ctx {
+                network: line.network,
+                buffer: line.buffer.clone(),
+            };
+            let m = murk_script::Message {
+                network: net.clone(),
+                buffer: line.buffer.clone().unwrap_or_default(),
+                nick: line.sender.clone().unwrap_or_default(),
+                text: line.text.clone(),
+                kind: match line.kind {
+                    LineKind::Notice => "notice",
+                    LineKind::Action => "action",
+                    _ => "msg",
+                },
+                own: line.own,
+                highlight: line.highlight,
+                msgid: line.msgid.clone(),
+            };
+            let keep = match self.scripts.as_ref().map(|s| s.on_message(&ctx, &m)) {
+                Some(Ok(k)) => k,
+                Some(Err(e)) => {
+                    self.set_status(format!("Script error in message hook: {e}"));
+                    true
+                }
+                None => true,
+            };
+            self.run_script_actions();
+            if !keep {
+                return;
+            }
         }
         if !line.highlight && !line.own {
             let words = &self.config.ui.highlights;
@@ -499,8 +600,161 @@ impl App {
         }
     }
 
+    /// `MURK_SCRIPTS_DIR` overrides the default `<config dir>/scripts`.
+    pub fn scripts_dir() -> std::path::PathBuf {
+        std::env::var_os("MURK_SCRIPTS_DIR")
+            .map(Into::into)
+            .unwrap_or_else(|| murk_config::config_dir().join("scripts"))
+    }
+
+    /// (Re)load every script. Failures are reported in the active buffer.
+    pub fn load_scripts(&mut self) {
+        let dir = Self::scripts_dir();
+        if !dir.exists() {
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(dir.join("example.lua.txt"), EXAMPLE_SCRIPT);
+        }
+        let mut host = match murk_script::ScriptHost::new() {
+            Ok(h) => h,
+            Err(e) => {
+                self.set_status(format!("Scripting unavailable: {e}"));
+                return;
+            }
+        };
+        let errors = host.load_dir(&dir);
+        self.scripts = Some(host);
+        for e in errors {
+            self.info(&format!("Script failed to load: {e}"));
+        }
+    }
+
+    fn script_ctx(&self) -> murk_script::Ctx {
+        match self.current() {
+            Some(b) => murk_script::Ctx {
+                network: b.network,
+                buffer: b.name.clone(),
+            },
+            None => murk_script::Ctx::default(),
+        }
+    }
+
+    fn script_command(&mut self, args: &str) {
+        match args {
+            "reload" => {
+                self.load_scripts();
+                let n = self.scripts.as_ref().map_or(0, |s| s.loaded().len());
+                self.info(&format!(
+                    "Reloaded {n} script(s) from {}",
+                    Self::scripts_dir().display()
+                ));
+            }
+            "" | "list" => {
+                let (loaded, cmds) = match &self.scripts {
+                    Some(s) => (s.loaded().join(", "), s.commands()),
+                    None => (String::new(), vec![]),
+                };
+                self.info(&format!(
+                    "Scripts in {}: {}",
+                    Self::scripts_dir().display(),
+                    if loaded.is_empty() { "none" } else { &loaded }
+                ));
+                for (_, help) in cmds {
+                    self.info(&format!("  {help}"));
+                }
+                self.info("/script reload picks up changes. See example.lua.txt in that folder.");
+            }
+            other => self.info(&format!(
+                "Unknown /script action '{other}': use list or reload"
+            )),
+        }
+    }
+
+    /// Carry out what scripts asked for. Runs a few rounds so scripts reacting to
+    /// their own output settle, without letting a loop run away.
+    fn run_script_actions(&mut self) {
+        for _ in 0..4 {
+            let Some(actions) = self.scripts.as_ref().map(|s| s.take_actions()) else {
+                return;
+            };
+            if actions.is_empty() {
+                return;
+            }
+            for (ctx, a) in actions {
+                let net = ctx.network;
+                use murk_script::Action as A;
+                match a {
+                    A::Say { target, text } => {
+                        self.engine.send(
+                            net,
+                            Command::Say {
+                                target,
+                                text,
+                                action: false,
+                            },
+                        );
+                    }
+                    A::Action { target, text } => {
+                        self.engine.send(
+                            net,
+                            Command::Say {
+                                target,
+                                text,
+                                action: true,
+                            },
+                        );
+                    }
+                    A::Raw(line) => {
+                        self.engine.send(net, Command::Raw(line));
+                    }
+                    A::Print(text) => {
+                        if self.networks.contains_key(&net) {
+                            self.local_line(net, ctx.buffer, LineKind::Server, &text);
+                        } else {
+                            self.info(&text);
+                        }
+                    }
+                    A::React { msgid, emoji } => {
+                        if let Some(target) = ctx.buffer {
+                            self.engine.send(
+                                net,
+                                Command::React {
+                                    target,
+                                    msgid,
+                                    emoji,
+                                },
+                            );
+                        }
+                    }
+                    A::Run(line) => self.run_line(&line),
+                }
+            }
+        }
+    }
+
+    fn script_event(&mut self, network: NetworkId, event: &str, fields: &[(&str, &str)]) {
+        let ctx = murk_script::Ctx {
+            network,
+            buffer: fields
+                .iter()
+                .find(|(k, _)| *k == "channel")
+                .map(|(_, v)| v.to_string()),
+        };
+        if let Some(s) = &self.scripts
+            && let Err(e) = s.on_event(&ctx, event, fields)
+        {
+            self.info(&format!("Script error in {event} hook: {e}"));
+        }
+        self.run_script_actions();
+    }
+
     pub fn tick(&mut self) {
         let now = Instant::now();
+        if let Some(s) = &self.scripts {
+            for e in s.tick(now) {
+                self.set_status(format!("Script timer failed: {e}"));
+            }
+            self.run_script_actions();
+        }
         for b in &mut self.buffers {
             b.typing
                 .retain(|_, t| now.duration_since(*t) < TYPING_EXPIRE);
@@ -577,11 +831,23 @@ impl App {
     pub fn completions(&self, prefix: &str) -> Vec<String> {
         let lower = prefix.to_lowercase();
         if let Some(cmd) = prefix.strip_prefix('/') {
-            return input::HELP
+            let cmd = cmd.to_lowercase();
+            let scripted = self
+                .scripts
+                .as_ref()
+                .map(|s| s.commands())
+                .unwrap_or_default();
+            let mut names: Vec<String> = input::HELP
                 .iter()
-                .filter(|(n, _)| n.starts_with(&cmd.to_lowercase()))
-                .map(|(n, _)| format!("/{n}"))
+                .map(|(n, _)| n.to_string())
+                .chain(scripted.into_iter().map(|(n, _)| n))
+                .chain(["script".to_string()])
+                .filter(|n| n.starts_with(&cmd))
+                .map(|n| format!("/{n}"))
                 .collect();
+            names.sort();
+            names.dedup();
+            return names;
         }
         if let Some(code) = prefix.strip_prefix(':')
             && !code.is_empty()
@@ -664,6 +930,43 @@ impl App {
         if !(lower.starts_with("/quote ") || lower.starts_with("/raw ")) {
             emojied = crate::emoji::expand(text);
             text = &emojied;
+        }
+
+        // Scripts: /script itself, then script-defined commands, then the input filter.
+        let ctx = self.script_ctx();
+        let filtered;
+        if let Some(body) = text.strip_prefix('/') {
+            let (cmd, args) = body.split_once(' ').unwrap_or((body, ""));
+            let cmd = cmd.to_lowercase();
+            if cmd == "script" || cmd == "scripts" {
+                self.script_command(args.trim());
+                return;
+            }
+            if !input::HELP.iter().any(|(n, _)| *n == cmd)
+                && let Some(r) = self
+                    .scripts
+                    .as_ref()
+                    .and_then(|s| s.run_command(&ctx, &cmd, args))
+            {
+                if let Err(e) = r {
+                    self.info(&format!("Script error: {e}"));
+                }
+                self.run_script_actions();
+                return;
+            }
+        } else if let Some(s) = &self.scripts {
+            match s.on_input(&ctx, text) {
+                Ok(Some(t)) => {
+                    filtered = t;
+                    text = &filtered;
+                }
+                Ok(None) => {
+                    self.run_script_actions();
+                    return;
+                }
+                Err(e) => self.info(&format!("Script error in input hook: {e}")),
+            }
+            self.run_script_actions();
         }
 
         let (net, target) = match self.current() {

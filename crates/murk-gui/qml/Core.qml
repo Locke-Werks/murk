@@ -13,7 +13,8 @@ QtObject {
     readonly property var settings: ctl.settings ? JSON.parse(ctl.settings) : ({})
     readonly property var emoji: JSON.parse(ctl.emojiCatalog())
     readonly property var quickReactions: JSON.parse(ctl.quickReactions())
-    readonly property var commands: JSON.parse(ctl.commands())
+    // Re-read once the controller has started, so script commands are included.
+    readonly property var commands: { ctl.ready; return JSON.parse(ctl.commands()) }
 
     // A reply being composed: {msgid, sender, text}, or null.
     property var replyTo: null

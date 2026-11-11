@@ -677,10 +677,16 @@ impl qobject::Controller {
     }
 
     pub fn commands(&self) -> QString {
-        let v: Vec<_> = murk_core::input::HELP
+        let mut v: Vec<_> = murk_core::input::HELP
             .iter()
             .map(|(n, u)| serde_json::json!({ "name": n, "usage": u }))
             .collect();
+        v.push(serde_json::json!({ "name": "script", "usage": "/script [list|reload]" }));
+        if let Some(s) = self.app.as_ref().and_then(|a| a.scripts.as_ref()) {
+            for (n, u) in s.commands() {
+                v.push(serde_json::json!({ "name": n, "usage": format!("{u}  (script)") }));
+            }
+        }
         json_str(&v.into())
     }
 
