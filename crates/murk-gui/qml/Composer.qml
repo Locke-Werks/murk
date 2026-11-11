@@ -230,6 +230,7 @@ Rectangle {
 
                     // Right-click a flagged word for suggestions.
                     TapHandler {
+                        longPressThreshold: 0
                         acceptedButtons: Qt.RightButton
                         onTapped: function (ev) {
                             const pos = input.positionAt(ev.position.x, ev.position.y)

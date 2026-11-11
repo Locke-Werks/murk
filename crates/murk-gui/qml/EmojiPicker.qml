@@ -64,7 +64,7 @@ Popup {
                 ToolTip.visible: cellHover.hovered
                 ToolTip.delay: 400
                 ToolTip.text: ":" + modelData.code + ":"
-                TapHandler { onTapped: { root.picked(modelData.emoji); root.close() } }
+                TapHandler { longPressThreshold: 0; onTapped: { root.picked(modelData.emoji); root.close() } }
             }
         }
     }

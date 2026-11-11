@@ -7,6 +7,9 @@ import Murk
 Popup {
     id: root
     modal: true
+    // Stop blocking the window as soon as closing starts, not when the fade ends.
+    onAboutToHide: modal = false
+    onAboutToShow: modal = true
     focus: true
     width: Math.min(720, parent.width - 80)
     height: Math.min(680, parent.height - 80)
@@ -163,7 +166,7 @@ Popup {
                         background: Rectangle { radius: 9; color: Theme.accent; implicitWidth: 70; implicitHeight: 32 }
                     }
                 }
-                TapHandler { onDoubleTapped: { Core.ctl.submit("/join " + modelData.name); root.close() } }
+                TapHandler { longPressThreshold: 0; onDoubleTapped: { Core.ctl.submit("/join " + modelData.name); root.close() } }
             }
             BusyIndicator {
                 anchors.centerIn: parent

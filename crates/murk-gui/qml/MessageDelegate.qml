@@ -125,6 +125,7 @@ Item {
                 letter: root.d.initial
                 tint: root.nickColor
                 TapHandler {
+                    longPressThreshold: 0
                     cursorShape: Qt.PointingHandCursor
                     onTapped: function (ev) {
                         const p = parent.mapToItem(null, ev.position.x, ev.position.y)
@@ -392,7 +393,7 @@ Item {
                             HoverHandler { id: chipHover }
                             ToolTip.visible: chipHover.hovered
                             ToolTip.text: modelData.who
-                            TapHandler { onTapped: if (!modelData.mine && root.d.msgid) Core.ctl.react(root.d.msgid, modelData.emoji) }
+                            TapHandler { longPressThreshold: 0; onTapped: if (!modelData.mine && root.d.msgid) Core.ctl.react(root.d.msgid, modelData.emoji) }
                         }
                     }
                 }

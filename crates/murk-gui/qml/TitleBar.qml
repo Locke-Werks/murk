@@ -19,6 +19,7 @@ Rectangle {
         onActiveChanged: if (active) root.window.startSystemMove()
     }
     TapHandler {
+        longPressThreshold: 0
         onDoubleTapped: root.toggleMax()
     }
 
@@ -71,7 +72,7 @@ Rectangle {
             font.pixelSize: 13
         }
         HoverHandler { id: hov }
-        TapHandler { onTapped: cap.clicked() }
+        TapHandler { longPressThreshold: 0; onTapped: cap.clicked() }
     }
 
     Row {

@@ -26,6 +26,9 @@ Popup {
 
     parent: Overlay.overlay
     modal: true
+    // Stop blocking the window as soon as closing starts, not when the fade ends.
+    onAboutToHide: modal = false
+    onAboutToShow: modal = true
     focus: true
     width: Math.min(480, parent.width - 120)
     height: parent.height
@@ -61,7 +64,7 @@ Popup {
                     color: root.tab === index ? Theme.alpha(Theme.accent, 0.16) : tabHover.hovered ? Theme.hover : "transparent"
                     HoverHandler { id: tabHover }
                     Text { id: tabText; anchors.centerIn: parent; text: modelData; color: root.tab === index ? Theme.accent : Theme.sub; font.family: Theme.uiFont; font.pixelSize: 14; font.weight: Font.DemiBold }
-                    TapHandler { onTapped: root.tab = index }
+                    TapHandler { longPressThreshold: 0; onTapped: root.tab = index }
                 }
             }
             Item { Layout.fillWidth: true }
@@ -148,6 +151,7 @@ Popup {
                     }
                 }
                 TapHandler {
+                    longPressThreshold: 0
                     onTapped: {
                         if (Core.ctl.openStored(modelData.network, modelData.buffer))
                             root.close()

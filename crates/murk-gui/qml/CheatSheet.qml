@@ -7,6 +7,9 @@ import Murk
 Popup {
     id: root
     modal: true
+    // Stop blocking the window as soon as closing starts, not when the fade ends.
+    onAboutToHide: modal = false
+    onAboutToShow: modal = true
     focus: true
     width: Math.min(760, parent.width - 80)
     x: (parent.width - width) / 2

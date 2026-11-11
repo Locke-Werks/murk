@@ -7,6 +7,9 @@ Popup {
     id: root
     signal editNetwork(var net)
     modal: true
+    // Stop blocking the window as soon as closing starts, not when the fade ends.
+    onAboutToHide: modal = false
+    onAboutToShow: modal = true
     focus: true
     width: Math.min(760, parent.width - 80)
     height: Math.min(640, parent.height - 80)
@@ -88,7 +91,7 @@ Popup {
                         color: root.page === index ? Theme.alpha(Theme.accent, 0.14) : navHover.hovered ? Theme.hover : "transparent"
                         HoverHandler { id: navHover }
                         Text { anchors.verticalCenter: parent.verticalCenter; x: 12; text: modelData; color: root.page === index ? Theme.accent : Theme.sub; font.family: Theme.uiFont; font.pixelSize: 14; font.weight: Font.Medium }
-                        TapHandler { onTapped: root.page = index }
+                        TapHandler { longPressThreshold: 0; onTapped: root.page = index }
                     }
                 }
             }

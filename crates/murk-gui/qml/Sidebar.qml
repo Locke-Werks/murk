@@ -168,8 +168,9 @@ Rectangle {
                     }
 
                     HoverHandler { id: hover }
-                    TapHandler { onTapped: Core.ctl.switchTo(row.modelData.index) }
+                    TapHandler { longPressThreshold: 0; onTapped: Core.ctl.switchTo(row.modelData.index) }
                     TapHandler {
+                        longPressThreshold: 0
                         acceptedButtons: Qt.RightButton
                         onTapped: { bufferMenu.target = row.modelData; bufferMenu.popup() }
                     }
@@ -324,8 +325,9 @@ Rectangle {
                             ToolTip.visible: fHover.hovered
                             ToolTip.delay: 500
                             ToolTip.text: on ? "Online on " + modelData.online.join(", ") + ". Click to chat." : "Offline"
-                            TapHandler { onTapped: Core.ctl.submit("/query " + modelData.nick) }
+                            TapHandler { longPressThreshold: 0; onTapped: Core.ctl.submit("/query " + modelData.nick) }
                             TapHandler {
+                                longPressThreshold: 0
                                 acceptedButtons: Qt.RightButton
                                 onTapped: Core.ctl.submit("/friend remove " + modelData.nick)
                             }

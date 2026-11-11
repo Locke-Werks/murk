@@ -147,7 +147,7 @@ Popup {
                         color: chanHover.hovered ? Theme.hover : Theme.alpha(Theme.text, 0.06)
                         HoverHandler { id: chanHover }
                         Text { id: chanText; anchors.centerIn: parent; text: modelData; color: Theme.sub; font.family: Theme.monoFont; font.pixelSize: 11 }
-                        TapHandler { onTapped: { Core.ctl.submit("/join " + modelData.replace(/^[~&@%+]+/, "")); root.close() } }
+                        TapHandler { longPressThreshold: 0; onTapped: { Core.ctl.submit("/join " + modelData.replace(/^[~&@%+]+/, "")); root.close() } }
                     }
                 }
             }

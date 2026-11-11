@@ -7,6 +7,9 @@ import Murk
 Popup {
     id: root
     modal: true
+    // Stop blocking the window as soon as closing starts, not when the fade ends.
+    onAboutToHide: modal = false
+    onAboutToShow: modal = true
     focus: true
     width: Math.min(560, parent.width - 80)
     x: (parent.width - width) / 2
@@ -115,6 +118,7 @@ Popup {
                     HoverHandler { id: presetHover }
                     Text { id: presetText; anchors.centerIn: parent; text: modelData.name; color: Theme.text; font.family: Theme.uiFont; font.pixelSize: 13 }
                     TapHandler {
+                        longPressThreshold: 0
                         onTapped: {
                             name.text = modelData.name; host.text = modelData.host
                             port.text = String(modelData.port); tls.checked = true

@@ -103,6 +103,7 @@ Rectangle {
                             }
                         }
                         TapHandler {
+                            longPressThreshold: 0
                             onSingleTapped: function (ev) {
                                 const p = parent.mapToItem(null, 0, ev.position.y)
                                 Core.profileRequested(modelData.nick, modelData.color, p.x - 350, p.y)
