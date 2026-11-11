@@ -18,6 +18,7 @@ Item {
         Rectangle { width: root.size * 0.28; height: root.size; radius: 1.5; color: root.color }
     }
     Canvas {
+        id: tri
         visible: !root.playing
         anchors.fill: parent
         // Optical centre: a triangle looks left-heavy when centred on its box.
@@ -34,6 +35,6 @@ Item {
             c.fill()
         }
         onWidthChanged: requestPaint()
-        Connections { target: root; function onColorChanged() { parent.requestPaint() } }
+        Connections { target: root; function onColorChanged() { tri.requestPaint() } }
     }
 }
