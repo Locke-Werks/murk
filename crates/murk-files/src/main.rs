@@ -3,13 +3,14 @@
 //! `POST /upload` takes a raw body plus `Content-Type` and an optional
 //! `Content-Disposition: attachment; filename="..."`, and answers `201 Created`
 //! with the file's URL in `Location` and in a JSON body. This is the upload
-//! shape of the `soju.im/FILEHOST` IRC extension, so the same endpoint can be
-//! advertised by an IRC server later.
+//! shape of the IRC `draft/FILEHOST` extension, so an IRC server can advertise
+//! this endpoint and its users log in with their IRC accounts.
 //!
-//! Only images, video and audio are accepted, and the type is decided by the
-//! file's own bytes, never by what the client claimed. Files are served from
-//! `/<id>/<name>` with `nosniff` and a sandboxing CSP, and deleted once older
-//! than the retention period.
+//! Any file is accepted. Images, video and audio, decided by the file's own
+//! bytes and never by what the client claimed, are served inline; everything
+//! else is served as a download that a browser will not render. Files live at
+//! `/<id>/<name>` with `nosniff` and a sandboxing CSP, and are deleted once
+//! older than the retention period.
 //!
 //! Configuration is environment only:
 //!   FILES_LISTEN           127.0.0.1:port (or PORT, bound on 127.0.0.1)
@@ -17,7 +18,12 @@
 //!   FILES_PUBLIC_URL       https://files.apps.example.com
 //!   FILES_TOKENS           comma-separated bearer tokens allowed to upload
 //!   FILES_RETENTION_HOURS  default 96
-//!   FILES_MAX_BYTES        default 104857600 (100 MiB)
+//!   FILES_MAX_BYTES        default 524288000 (500 MiB) per file
+//!   FILES_MAX_TOTAL_BYTES  default 50 GiB for everything stored
+//!   FILES_ERGO_API         127.0.0.1:17713, to accept IRC account logins
+//!   FILES_ERGO_TOKEN       a bearer token for that API
+
+mod ircauth;
 
 use axum::{
     Router,
@@ -44,6 +50,9 @@ struct Config {
     tokens: Vec<Vec<u8>>,
     retention: Duration,
     max_bytes: u64,
+    max_total: u64,
+    /// FILEHOST logins, checked against Ergo, when configured.
+    irc: Option<ircauth::IrcAuth>,
 }
 
 type Shared = Arc<Config>;
@@ -69,8 +78,14 @@ fn config() -> Result<(Config, String), String> {
         .map(|t| t.trim().as_bytes().to_vec())
         .filter(|t| t.len() >= 24)
         .collect();
-    if tokens.is_empty() {
-        return Err("set FILES_TOKENS to at least one token of 24 or more characters".into());
+    let irc = match (env("FILES_ERGO_API"), env("FILES_ERGO_TOKEN")) {
+        (Some(api), Some(token)) => Some(ircauth::IrcAuth::new(api, token)),
+        _ => None,
+    };
+    if tokens.is_empty() && irc.is_none() {
+        return Err(
+            "set FILES_TOKENS (24+ characters each), or FILES_ERGO_API and FILES_ERGO_TOKEN".into(),
+        );
     }
     let hours: u64 = env("FILES_RETENTION_HOURS")
         .map(|h| {
@@ -82,14 +97,25 @@ fn config() -> Result<(Config, String), String> {
     let max_bytes: u64 = env("FILES_MAX_BYTES")
         .map(|h| h.parse().map_err(|_| "FILES_MAX_BYTES is not a number"))
         .transpose()?
-        .unwrap_or(100 * 1024 * 1024);
+        .unwrap_or(500 * 1024 * 1024);
+    // The store shares a disk with everything else on the host; this keeps a flood
+    // of uploads from filling it.
+    let max_total: u64 = env("FILES_MAX_TOTAL_BYTES")
+        .map(|h| {
+            h.parse()
+                .map_err(|_| "FILES_MAX_TOTAL_BYTES is not a number")
+        })
+        .transpose()?
+        .unwrap_or(50 * 1024 * 1024 * 1024);
     Ok((
         Config {
             dir: PathBuf::from(dir),
             public_url,
             tokens,
+            irc,
             retention: Duration::from_secs(hours * 3600),
             max_bytes,
+            max_total,
         },
         listen,
     ))
@@ -147,23 +173,110 @@ fn plain(status: StatusCode, msg: &'static str) -> Response {
     (status, msg).into_response()
 }
 
-fn authorized(cfg: &Config, headers: &HeaderMap) -> bool {
-    let Some(given) = headers
+/// A bearer token from FILES_TOKENS, or an IRC account login (HTTP Basic, as the
+/// FILEHOST spec has clients send) that Ergo accepts.
+/// `None` when the request may upload, otherwise the refusal to send.
+async fn authorize(cfg: &Config, headers: &HeaderMap) -> Option<Response> {
+    let refuse = |status: StatusCode, msg: &'static str| {
+        (
+            status,
+            [(header::WWW_AUTHENTICATE, "Basic realm=\"files\", Bearer")],
+            msg,
+        )
+            .into_response()
+    };
+    let auth = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-    else {
-        return false;
-    };
-    let given = given.trim().as_bytes();
-    // Check every token so the time taken says nothing about which one was close.
-    cfg.tokens
-        .iter()
-        .fold(false, |ok, t| ok | bool::from(t.as_slice().ct_eq(given)))
+        .unwrap_or("");
+    if let Some(given) = auth.strip_prefix("Bearer ") {
+        let given = given.trim().as_bytes();
+        // Check every token so the time taken says nothing about which one was close.
+        let ok = cfg
+            .tokens
+            .iter()
+            .fold(false, |ok, t| ok | bool::from(t.as_slice().ct_eq(given)));
+        return if ok {
+            None
+        } else {
+            Some(refuse(
+                StatusCode::UNAUTHORIZED,
+                "the upload token is not valid",
+            ))
+        };
+    }
+    if let (Some(basic), Some(irc)) = (auth.strip_prefix("Basic "), cfg.irc.as_ref()) {
+        use base64::Engine;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(basic.trim())
+            .ok()
+            .and_then(|b| String::from_utf8(b).ok());
+        let Some((user, pass)) = decoded.as_deref().and_then(|s| s.split_once(':')) else {
+            return Some(refuse(StatusCode::UNAUTHORIZED, "malformed login"));
+        };
+        // Caddy is the only thing that reaches this listener, and it sets this header.
+        let from = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.split(',').next())
+            .map(str::trim)
+            .unwrap_or("local");
+        return match irc.check(user, pass, from).await {
+            ircauth::Verdict::Allowed => None,
+            ircauth::Verdict::Denied => Some(refuse(
+                StatusCode::UNAUTHORIZED,
+                "the IRC account name or password is wrong",
+            )),
+            ircauth::Verdict::Limited => Some(refuse(
+                StatusCode::TOO_MANY_REQUESTS,
+                "too many failed logins; try again later",
+            )),
+            ircauth::Verdict::Unavailable => Some(refuse(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "cannot check logins right now",
+            )),
+        };
+    }
+    Some(refuse(
+        StatusCode::UNAUTHORIZED,
+        "log in with your IRC account, or send an upload token",
+    ))
 }
 
-/// Types we host, decided from the file's bytes. SVG is deliberately absent:
-/// it can carry script.
+/// Extensions served inline. Only files whose bytes proved them to be media are
+/// ever stored with one (`other_ext` keeps everything else off this list).
+const MEDIA_EXTS: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "avif", "heic", "heif", "bmp", "ico", "tif", "tiff",
+    "jxl", "mp4", "m4v", "webm", "mov", "mkv", "avi", "mpg", "flv", "wmv", "mp3", "ogg", "oga",
+    "opus", "m4a", "wav", "flac", "aac", "aiff", "amr", "mid", "dsf", "ape",
+];
+
+fn is_media_name(name: &str) -> bool {
+    name.rsplit_once('.')
+        .is_some_and(|(_, e)| MEDIA_EXTS.contains(&e.to_ascii_lowercase().as_str()))
+}
+
+/// The extension for a file that is not media: the one it came with, cleaned,
+/// unless that would pass it off as media, in which case `bin`.
+fn other_ext(given: Option<&str>) -> String {
+    let ext: String = given
+        .and_then(|n| n.rsplit(['/', '\\']).next())
+        .and_then(|n| n.rsplit_once('.'))
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .unwrap_or_default()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(10)
+        .collect();
+    if ext.is_empty() || MEDIA_EXTS.contains(&ext.as_str()) {
+        "bin".into()
+    } else {
+        ext
+    }
+}
+
+/// Media we show inline, decided from the file's bytes. SVG is deliberately
+/// absent: it can carry script, so it is served as a download like any other file.
 fn allowed(kind: &infer::Type) -> bool {
     matches!(
         kind.matcher_type(),
@@ -222,13 +335,8 @@ fn filename_from(headers: &HeaderMap) -> Option<String> {
 
 async fn upload(State(cfg): State<Shared>, req: Request) -> Response {
     let headers = req.headers().clone();
-    if !authorized(&cfg, &headers) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            [(header::WWW_AUTHENTICATE, "Bearer")],
-            "a valid upload token is required",
-        )
-            .into_response();
+    if let Some(refused) = authorize(&cfg, &headers).await {
+        return refused;
     }
     if let Some(len) = headers
         .get(header::CONTENT_LENGTH)
@@ -247,6 +355,7 @@ async fn upload(State(cfg): State<Shared>, req: Request) -> Response {
     };
 
     // Stream to disk, counting, so a lying Content-Length cannot fill the disk.
+    let used = stored_bytes(&cfg.dir).await;
     let mut head: Vec<u8> = Vec::with_capacity(8192);
     let mut total: u64 = 0;
     let mut stream = req.into_body().into_data_stream();
@@ -261,6 +370,14 @@ async fn upload(State(cfg): State<Shared>, req: Request) -> Response {
             let _ = tokio::fs::remove_file(&staging).await;
             return plain(StatusCode::PAYLOAD_TOO_LARGE, "file is too large");
         }
+        if used + total > cfg.max_total {
+            drop(file);
+            let _ = tokio::fs::remove_file(&staging).await;
+            return plain(
+                StatusCode::INSUFFICIENT_STORAGE,
+                "the file host is full; older files expire within four days",
+            );
+        }
         if head.len() < 8192 {
             let take = (8192 - head.len()).min(chunk.len());
             head.extend_from_slice(&chunk[..take]);
@@ -273,18 +390,15 @@ async fn upload(State(cfg): State<Shared>, req: Request) -> Response {
     let _ = file.flush().await;
     drop(file);
 
-    let kind = match infer::get(&head) {
-        Some(k) if allowed(&k) => k,
-        _ => {
-            let _ = tokio::fs::remove_file(&staging).await;
-            return plain(
-                StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                "only images, video and audio are accepted",
-            );
-        }
+    // Any file is accepted. Media, decided from the bytes, keeps a media extension
+    // and is shown inline; everything else is served as a download (see `serve`).
+    let given = filename_from(&headers);
+    let kind = infer::get(&head).filter(allowed);
+    let (ext, mime) = match &kind {
+        Some(k) => (k.extension().to_string(), k.mime_type()),
+        None => (other_ext(given.as_deref()), "application/octet-stream"),
     };
-
-    let name = clean_name(filename_from(&headers).as_deref(), kind.extension());
+    let name = clean_name(given.as_deref(), &ext);
     let dir = cfg.dir.join(&id);
     if tokio::fs::create_dir(&dir).await.is_err()
         || tokio::fs::rename(&staging, dir.join(&name)).await.is_err()
@@ -294,7 +408,7 @@ async fn upload(State(cfg): State<Shared>, req: Request) -> Response {
     }
 
     let url = format!("{}/{id}/{name}", cfg.public_url);
-    let body = serde_json::json!({ "url": url, "type": kind.mime_type(), "bytes": total });
+    let body = serde_json::json!({ "url": url, "type": mime, "bytes": total });
     let mut resp = (StatusCode::CREATED, body.to_string()).into_response();
     let h = resp.headers_mut();
     h.insert(
@@ -359,11 +473,44 @@ async fn serve(
         header::CACHE_CONTROL,
         HeaderValue::from_static("public, max-age=86400, immutable"),
     );
-    h.insert(
-        header::CONTENT_DISPOSITION,
-        HeaderValue::from_static("inline"),
-    );
+    if is_media_name(&name) {
+        h.insert(
+            header::CONTENT_DISPOSITION,
+            HeaderValue::from_static("inline"),
+        );
+    } else {
+        // Anything that is not proven media is a download, never a page: an
+        // uploaded HTML or SVG file must not run on this domain.
+        h.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/octet-stream"),
+        );
+        if let Ok(v) = HeaderValue::from_str(&format!("attachment; filename=\"{name}\"")) {
+            h.insert(header::CONTENT_DISPOSITION, v);
+        }
+    }
     resp
+}
+
+/// Bytes held in the store: every `<id>/<file>` plus half-written uploads.
+async fn stored_bytes(dir: &std::path::Path) -> u64 {
+    let mut total = 0;
+    let Ok(mut top) = tokio::fs::read_dir(dir).await else {
+        return 0;
+    };
+    while let Ok(Some(e)) = top.next_entry().await {
+        let Ok(meta) = e.metadata().await else {
+            continue;
+        };
+        if meta.is_file() {
+            total += meta.len();
+        } else if let Ok(mut inner) = tokio::fs::read_dir(e.path()).await {
+            while let Ok(Some(f)) = inner.next_entry().await {
+                total += f.metadata().await.map(|m| m.len()).unwrap_or(0);
+            }
+        }
+    }
+    total
 }
 
 /// Delete anything older than the retention period, every ten minutes.
@@ -441,10 +588,22 @@ mod tests {
     }
 
     #[test]
-    fn only_media_is_allowed() {
+    fn only_media_is_inline() {
         let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
         assert!(infer::get(&png).is_some_and(|k| allowed(&k)));
         let zip = [b'P', b'K', 3, 4, 0, 0, 0, 0];
         assert!(!infer::get(&zip).is_some_and(|k| allowed(&k)));
+    }
+
+    #[test]
+    fn other_files_cannot_pose_as_media() {
+        assert_eq!(other_ext(Some("notes.PDF")), "pdf");
+        assert_eq!(other_ext(Some("page.html")), "html");
+        // Bytes that were not media keep no media extension, so they stay a download.
+        assert_eq!(other_ext(Some("fake.png")), "bin");
+        assert_eq!(other_ext(Some("noext")), "bin");
+        assert!(is_media_name("clip.MP4"));
+        assert!(!is_media_name("page.html"));
+        assert!(!is_media_name("drawing.svg"));
     }
 }

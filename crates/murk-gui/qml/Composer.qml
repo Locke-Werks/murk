@@ -28,8 +28,6 @@ Rectangle {
     // the message, so a caption can go with it before Enter.
     ListModel { id: uploads }
     readonly property bool uploadReady: Core.settings.uploadReady === true
-    readonly property var mediaPattern: /\.(png|jpe?g|gif|webp|avif|heic|bmp|mp4|m4v|webm|mov|mkv|mp3|ogg|oga|opus|m4a|wav|flac)$/i
-    function isMedia(url) { return mediaPattern.test(decodeURIComponent(url.toString())) }
     function uploadFiles(urls) {
         for (const u of urls) {
             const s = u.toString()
@@ -68,9 +66,9 @@ Rectangle {
     }
     FileDialog {
         id: picker
-        title: "Share images, video or audio"
+        title: "Share files"
         fileMode: FileDialog.OpenFiles
-        nameFilters: ["Images, video and audio (*.png *.jpg *.jpeg *.gif *.webp *.avif *.heic *.bmp *.mp4 *.m4v *.webm *.mov *.mkv *.mp3 *.ogg *.opus *.m4a *.wav *.flac)"]
+        nameFilters: ["All files (*)"]
         onAccepted: root.uploadFiles(selectedFiles)
     }
 
@@ -278,7 +276,7 @@ Rectangle {
                 Layout.alignment: Qt.AlignBottom
                 Layout.bottomMargin: 7
                 glyph: "+"
-                tip: root.uploadReady ? "Share images, video or audio (or drop them on the window)"
+                tip: root.uploadReady ? "Share a file, up to 500 MB (or drop it on the window)"
                                       : "Sharing files needs an upload host: set [upload] in the config"
                 opacity: root.uploadReady ? 1 : 0.45
                 onClicked: {

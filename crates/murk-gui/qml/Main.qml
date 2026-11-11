@@ -193,24 +193,19 @@ ApplicationWindow {
                     if (ev.hasUrls)
                         ev.acceptProposedAction()
                 }
-                // Images, video and audio go to the upload host and appear inline for
-                // everyone. Anything else can only travel by DCC, to one person.
+                // With an upload host every file is shared by link, media shown inline.
+                // Without one, files can only travel by DCC, to one person.
                 readonly property bool canShare: chat.composer.uploadReady
                 onDropped: function (ev) {
-                    const media = [], other = []
-                    for (const u of ev.urls)
-                        (canShare && chat.composer.isMedia(u) ? media : other).push(u)
-                    if (media.length)
-                        chat.composer.uploadFiles(media)
-                    if (!other.length)
-                        return
-                    if (Core.ctl.kind !== "query") {
-                        toast.show(canShare ? "Only media is shared in channels" : "Files go to people",
-                                   canShare ? "Images, video and audio upload here. Send other files to one person from a private conversation."
-                                            : "Open a private conversation, then drop the file there.", -1)
+                    if (canShare) {
+                        chat.composer.uploadFiles(ev.urls)
                         return
                     }
-                    for (const u of other)
+                    if (Core.ctl.kind !== "query") {
+                        toast.show("Files go to people", "Open a private conversation, then drop the file there.", -1)
+                        return
+                    }
+                    for (const u of ev.urls)
                         Core.ctl.dccSend(Core.ctl.title, u.toString())
                 }
                 Rectangle {

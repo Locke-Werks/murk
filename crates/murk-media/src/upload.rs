@@ -1,6 +1,6 @@
 //! Uploading a file to an HTTP file host and getting its public URL back.
 //!
-//! The request is the `soju.im/FILEHOST` shape: a raw body with `Content-Type`
+//! The request is the IRC `draft/FILEHOST` shape: a raw body with `Content-Type`
 //! and `Content-Disposition`, answered by `201 Created` and a `Location` header.
 //! murk-files speaks it, and so do IRC servers that advertise FILEHOST.
 
@@ -10,7 +10,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Larger files are refused before any bytes are sent.
-pub const MAX_BYTES: u64 = 100 * 1024 * 1024;
+pub const MAX_BYTES: u64 = 500 * 1024 * 1024;
 const CHUNK: usize = 256 * 1024;
 
 /// How to authenticate to the host.
@@ -58,19 +58,48 @@ pub async fn upload(
     path: &Path,
     progress: impl Fn(u64, u64) + Send + Sync + 'static,
 ) -> Result<String, String> {
-    crate::install_crypto();
-    let data = tokio::fs::read(path)
-        .await
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    upload_bytes(
+    use tokio::io::AsyncReadExt;
+    let cannot = |e: std::io::Error| format!("cannot read {}: {e}", path.display());
+    let file = tokio::fs::File::open(path).await.map_err(cannot)?;
+    let total = file.metadata().await.map_err(cannot)?.len();
+    check_size(total)?;
+    // Read from disk as the request goes out, so a large file is never all in memory.
+    let body = stream::unfold((file, 0u64, progress), move |(mut f, sent, p)| async move {
+        let mut buf = vec![0u8; CHUNK];
+        match f.read(&mut buf).await {
+            Ok(0) => None,
+            Ok(n) => {
+                buf.truncate(n);
+                let sent = sent + n as u64;
+                p(sent, total);
+                Some((Ok::<_, std::io::Error>(buf), (f, sent, p)))
+            }
+            Err(e) => Some((Err(e), (f, sent, p))),
+        }
+    });
+    send(
         endpoint,
         auth,
-        data,
-        file_name(path),
+        reqwest::Body::wrap_stream(body),
+        total,
+        &file_name(path),
         mime_for(path),
-        progress,
     )
     .await
+}
+
+fn check_size(total: u64) -> Result<(), String> {
+    if total == 0 {
+        return Err("the file is empty".into());
+    }
+    if total > MAX_BYTES {
+        return Err(format!(
+            "the file is {} MB; the limit is {} MB",
+            total / 1_000_000,
+            MAX_BYTES / 1_000_000
+        ));
+    }
+    Ok(())
 }
 
 /// Upload bytes already in memory, such as an image pasted from the clipboard.
@@ -82,19 +111,8 @@ pub async fn upload_bytes(
     mime: &str,
     progress: impl Fn(u64, u64) + Send + Sync + 'static,
 ) -> Result<String, String> {
-    crate::install_crypto();
     let total = data.len() as u64;
-    if total == 0 {
-        return Err("the file is empty".into());
-    }
-    if total > MAX_BYTES {
-        return Err(format!(
-            "the file is {} MB; the limit is {} MB",
-            total / 1_000_000,
-            MAX_BYTES / 1_000_000
-        ));
-    }
-
+    check_size(total)?;
     // Hand the body over in chunks so progress tracks what has actually been taken.
     let chunks: Vec<Vec<u8>> = data.chunks(CHUNK).map(<[u8]>::to_vec).collect();
     let mut sent = 0u64;
@@ -103,10 +121,31 @@ pub async fn upload_bytes(
         progress(sent, total);
         Ok::<_, std::io::Error>(c)
     }));
+    send(
+        endpoint,
+        auth,
+        reqwest::Body::wrap_stream(body_stream),
+        total,
+        &name,
+        mime,
+    )
+    .await
+}
 
-    // Generous: a 100 MB video on a slow uplink takes a while.
+async fn send(
+    endpoint: &str,
+    auth: Auth,
+    body: reqwest::Body,
+    total: u64,
+    name: &str,
+    mime: &str,
+) -> Result<String, String> {
+    crate::install_crypto();
+    // No overall timeout: 500 MB on a slow uplink can take a long time. A
+    // connection that stops moving still fails on the read timeout.
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(600))
+        .connect_timeout(Duration::from_secs(20))
+        .read_timeout(Duration::from_secs(120))
         .build()
         .map_err(|e| e.to_string())?;
     let safe_name: String = name
@@ -127,7 +166,7 @@ pub async fn upload_bytes(
             CONTENT_DISPOSITION,
             format!("attachment; filename=\"{safe_name}\""),
         )
-        .body(reqwest::Body::wrap_stream(body_stream));
+        .body(body);
     req = match auth {
         Auth::Bearer(t) => req.header(AUTHORIZATION, format!("Bearer {t}")),
         Auth::Basic { user, pass } => req.basic_auth(user, Some(pass)),

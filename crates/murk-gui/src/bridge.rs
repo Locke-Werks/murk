@@ -386,6 +386,61 @@ fn pulse(lines: &std::collections::VecDeque<murk_core::Line>) -> Vec<u8> {
         .collect()
 }
 
+/// Where an upload from the active buffer goes, and how it logs in.
+///
+/// A network that advertises FILEHOST (`draft/FILEHOST`, or soju's
+/// `soju.im/FILEHOST`) gets its own host, logged into with the network's SASL
+/// PLAIN account as the spec describes. Anything else uses `[upload]`.
+fn upload_target(app: &App) -> Result<(String, murk_media::upload::Auth), String> {
+    use murk_media::upload::Auth;
+    let network = app.buffers.get(app.active).map(|b| b.network);
+    let filehost = network.and_then(|n| {
+        app.engine
+            .with_state(n, |s| {
+                ["DRAFT/FILEHOST", "SOJU.IM/FILEHOST"]
+                    .iter()
+                    .find_map(|k| s.isupport.get(k).flatten().map(str::to_string))
+            })
+            .flatten()
+    });
+    if let (Some(url), Some(net)) = (filehost.filter(|u| u.starts_with("https://")), network) {
+        let name = app
+            .networks
+            .get(&net)
+            .map(|n| n.name.clone())
+            .unwrap_or_default();
+        let sasl = app
+            .config
+            .networks
+            .iter()
+            .find(|n| n.name.eq_ignore_ascii_case(&name))
+            .and_then(|n| n.sasl.clone());
+        if let Some(murk_config::SaslConfig::Plain { username, password }) = sasl {
+            let pass = password
+                .resolve()
+                .map_err(|e| format!("Could not read the {name} password: {e}"))?;
+            return Ok((
+                url,
+                Auth::Basic {
+                    user: username,
+                    pass,
+                },
+            ));
+        }
+    }
+    let Some(endpoint) = app.config.upload.url.clone() else {
+        return Err(
+            "No upload host here. This network has no FILEHOST; set [upload] in the config.".into(),
+        );
+    };
+    let auth = match app.config.upload.token.as_ref().map(|t| t.resolve()) {
+        Some(Ok(t)) => Auth::Bearer(t),
+        Some(Err(e)) => return Err(format!("Could not read the upload token: {e}")),
+        None => Auth::None,
+    };
+    Ok((endpoint, auth))
+}
+
 enum UploadSource {
     Path(std::path::PathBuf),
     Bytes {
@@ -396,7 +451,7 @@ enum UploadSource {
 }
 
 enum ClipMedia {
-    /// Files copied in a file manager, already filtered to images, video and audio.
+    /// Files copied in a file manager.
     Files(Vec<std::path::PathBuf>),
     /// A copied bitmap (a screenshot, "Copy image"), encoded as PNG.
     Image(Vec<u8>),
@@ -410,12 +465,9 @@ fn read_clipboard_media() -> ClipMedia {
         return ClipMedia::Nothing;
     };
     if let Ok(files) = clip.get().file_list() {
-        let media: Vec<_> = files
-            .into_iter()
-            .filter(|p| murk_media::upload::mime_for(p) != "application/octet-stream")
-            .collect();
-        if !media.is_empty() {
-            return ClipMedia::Files(media);
+        let files: Vec<_> = files.into_iter().filter(|p| p.is_file()).collect();
+        if !files.is_empty() {
+            return ClipMedia::Files(files);
         }
     }
     // A bitmap only counts when there is no text: copying text out of some apps
@@ -1161,26 +1213,13 @@ impl qobject::Controller {
         let Some(app) = self.app.as_ref() else {
             return -1;
         };
-        let Some(endpoint) = app.config.upload.url.clone() else {
-            let qt = self.qt_thread();
-            let _ = qt.queue(|c| {
-                c.upload_finished(
-                    -1,
-                    QString::default(),
-                    qs("No upload host is set. Add [upload] url and token to the config."),
-                )
-            });
-            return -1;
-        };
-        let auth = match app.config.upload.token.as_ref().map(|t| t.resolve()) {
-            Some(Ok(t)) => murk_media::upload::Auth::Bearer(t),
-            Some(Err(e)) => {
-                let msg = format!("Could not read the upload token: {e}");
+        let (endpoint, auth) = match upload_target(app) {
+            Ok(t) => t,
+            Err(msg) => {
                 let qt = self.qt_thread();
                 let _ = qt.queue(move |c| c.upload_finished(-1, QString::default(), qs(&msg)));
                 return -1;
             }
-            None => murk_media::upload::Auth::None,
         };
         let id = {
             let r = self.as_mut().rust_mut().get_mut();
