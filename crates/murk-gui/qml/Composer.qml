@@ -179,7 +179,7 @@ Rectangle {
                     wrapMode: TextArea.Wrap
                     color: Theme.text
                     selectionColor: Theme.alpha(Theme.accent, 0.35)
-                    placeholderText: Core.ctl.kind === "channel" ? "Message #" + Core.ctl.title.replace(/^#+/, "")
+                    placeholderText: Core.ctl.kind === "channel" ? "Message " + Core.ctl.title
                                    : Core.ctl.kind === "query" ? "Message " + Core.ctl.title
                                    : "Type /join #channel, or /help"
                     placeholderTextColor: Theme.faint

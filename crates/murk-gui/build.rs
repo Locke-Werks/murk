@@ -22,6 +22,8 @@ const COMPONENTS: &[&str] = &[
     "qml/ProfileCard.qml",
     "qml/ChannelBrowser.qml",
     "qml/CheatSheet.qml",
+    "qml/TitleBar.qml",
+    "qml/ResizeFrame.qml",
 ];
 
 fn main() {

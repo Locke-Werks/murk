@@ -11,6 +11,7 @@ ApplicationWindow {
     minimumWidth: 760
     minimumHeight: 480
     visible: true
+    flags: Qt.Window | Qt.FramelessWindowHint
     // Unread messages elsewhere show in the taskbar: "(3) #rust · Murk".
     readonly property int unreadElsewhere: Core.buffers.reduce((n, b) => n + (b.active || b.muted ? 0 : b.unread), 0)
     title: (unreadElsewhere > 0 ? "(" + unreadElsewhere + ") " : "")
@@ -93,9 +94,12 @@ ApplicationWindow {
     }
 
     Backdrop { anchors.fill: parent }
+    TitleBar { id: titleBar; window: win; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; z: 10 }
+    ResizeFrame { window: win; anchors.fill: parent }
 
     RowLayout {
         anchors.fill: parent
+        anchors.topMargin: titleBar.height
         spacing: 0
 
         Sidebar {

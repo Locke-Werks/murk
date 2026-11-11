@@ -210,7 +210,7 @@ Rectangle {
                         Text {
                             Layout.fillWidth: true
                             text: row.modelData.server ? row.modelData.name
-                                 : row.modelData.channel ? row.modelData.name.replace(/^#+/, "") : row.modelData.name
+                                 : row.modelData.channel ? row.modelData.name.replace(/^#/, "") : row.modelData.name
                             elide: Text.ElideRight
                             font.family: Theme.uiFont
                             font.pixelSize: row.modelData.server ? 12 : 14

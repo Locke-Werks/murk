@@ -85,7 +85,7 @@ Item {
                         Layout.fillWidth: true
                         spacing: 10
                         Text {
-                            text: Core.ctl.kind === "channel" ? Core.ctl.title.replace(/^#+/, "") : Core.ctl.title
+                            text: Core.ctl.kind === "channel" ? Core.ctl.title.replace(/^#/, "") : Core.ctl.title
                             color: Theme.text
                             font.family: Theme.displayFont
                             font.pixelSize: 18
