@@ -118,7 +118,7 @@ Item {
                         font.pixelSize: 13
                         elide: Text.ElideRight
                         maximumLineCount: 1
-                        onLinkActivated: function (link) { Qt.openUrlExternally(link) }
+                        onLinkActivated: function (link) { Core.openLink(link) }
                         HoverHandler { id: topicHover }
                         ToolTip.visible: topicHover.hovered && truncated
                         ToolTip.text: text

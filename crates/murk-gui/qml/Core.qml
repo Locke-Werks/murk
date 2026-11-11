@@ -23,6 +23,27 @@ QtObject {
 
     // Anyone can ask for a profile card; Main shows it.
     signal profileRequested(string nick, string color, real x, real y)
+    // Images and video open in the in-app viewer; Main shows it. kind: "image" or "movie".
+    signal mediaRequested(string url, string kind, string image)
+
+    readonly property var imagePattern: /\.(png|jpe?g|gif|webp|avif|bmp)(\?|#|$)/i
+    readonly property var moviePattern: /\.(mp4|m4v|webm|mov|mkv)(\?|#|$)/i
+
+    // Every link click goes through here. Images and video stay in Murk, in the
+    // viewer; anything else opens with whatever the system uses for it.
+    function openLink(url) {
+        const p = previewCache[url]
+        const known = p && p !== "pending"
+        if (known && p.kind === "image")
+            return mediaRequested(url, "image", p.image || url)
+        if (known && p.kind === "movie")
+            return mediaRequested(url, "movie", "")
+        if (!known && imagePattern.test(url))
+            return mediaRequested(url, "image", url)
+        if (!known && moviePattern.test(url))
+            return mediaRequested(url, "movie", "")
+        Qt.openUrlExternally(url)
+    }
 
     // Rich text from Rust carries a placeholder link color; give links the theme's accent.
     function themed(html) {

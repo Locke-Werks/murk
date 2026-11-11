@@ -238,7 +238,7 @@ Item {
                             return prefix + "<i><span style='color:" + nc + "'>• " + d.sender + "</span> " + Core.themed(d.body) + "</i>"
                         return prefix + Core.themed(d.body)
                     }
-                    onLinkActivated: function (link) { Qt.openUrlExternally(link) }
+                    onLinkActivated: function (link) { Core.openLink(link) }
                     HoverHandler { cursorShape: text.hoveredLink ? Qt.PointingHandCursor : Qt.IBeamCursor }
                     // Typing while a message is selected goes to the composer, not into the void.
                     Keys.onPressed: function (e) {
@@ -300,7 +300,7 @@ Item {
                                     opacity: status === Image.Ready ? 1 : 0
                                     Behavior on opacity { NumberAnimation { duration: Theme.med } }
                                 }
-                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: Qt.openUrlExternally(pv.modelData) }
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: Core.openLink(pv.modelData) }
                             }
 
                             // Page card.
@@ -505,7 +505,7 @@ Item {
                 color: root.d.kind === "error" ? Theme.bad : Theme.sub
                 selectionColor: Theme.alpha(Theme.accent, 0.35)
                 text: "<span style='color:" + Theme.faint + "'>" + root.d.time + "</span>&nbsp;&nbsp;" + Core.themed(root.d.body)
-                onLinkActivated: function (link) { Qt.openUrlExternally(link) }
+                onLinkActivated: function (link) { Core.openLink(link) }
             }
         }
     }

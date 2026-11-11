@@ -56,7 +56,7 @@ Rectangle {
         width: 64; height: 64; radius: 32
         color: Theme.alpha("#000", 0.55)
         border.color: Theme.alpha("#fff", 0.6)
-        Text { anchors.centerIn: parent; anchors.horizontalCenterOffset: 3; text: "▶"; color: "white"; font.pixelSize: 26 }
+        PlayGlyph { anchors.centerIn: parent; color: "white"; size: 24 }
     }
     Text {
         visible: root.video && !root.started
@@ -80,7 +80,7 @@ Rectangle {
         Rectangle {
             width: 36; height: 36; radius: 18
             color: Theme.accent
-            Text { anchors.centerIn: parent; anchors.horizontalCenterOffset: root.playing ? 0 : 2; text: root.playing ? "❚❚" : "▶"; color: Theme.bg; font.pixelSize: 14 }
+            PlayGlyph { anchors.centerIn: parent; playing: root.playing; color: Theme.bg; size: 13 }
         }
         Column {
             anchors.verticalCenter: parent.verticalCenter
@@ -105,6 +105,25 @@ Rectangle {
         height: 3
         color: Theme.accent
         width: player.duration > 0 ? parent.width * player.position / player.duration : 0
+    }
+
+    // Full-window view, top left: for video, always available.
+    Rectangle {
+        visible: root.video
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.margins: 8
+        width: 30; height: 30; radius: 15
+        color: Theme.alpha("#000", 0.55)
+        z: 2
+        Text { anchors.centerIn: parent; text: "⤢"; color: "white"; font.pixelSize: 15 }
+        HoverHandler { id: expandHover }
+        ToolTip.visible: expandHover.hovered
+        ToolTip.text: "Open full window"
+        TapHandler {
+            longPressThreshold: 0
+            onTapped: { player.pause(); Core.mediaRequested(root.url, "movie", "") }
+        }
     }
 
     // Mute toggle, top right, once playing.

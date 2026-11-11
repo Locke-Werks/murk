@@ -174,6 +174,10 @@ pub mod qobject {
         #[qinvokable]
         fn paste_media(self: Pin<&mut Controller>) -> QString;
 
+        /// Put text on the system clipboard.
+        #[qinvokable]
+        fn copy_text(self: &Controller, text: &QString);
+
         /// Slash commands with usage: JSON `[{name, usage}]`.
         #[qinvokable]
         fn commands(self: &Controller) -> QString;
@@ -1145,6 +1149,12 @@ impl qobject::Controller {
             ClipMedia::Nothing => Vec::new(),
         };
         json_str(&serde_json::Value::Array(started))
+    }
+
+    pub fn copy_text(&self, text: &QString) {
+        if let Ok(mut clip) = arboard::Clipboard::new() {
+            let _ = clip.set_text(text.to_string());
+        }
     }
 
     fn start_upload(mut self: Pin<&mut Self>, source: UploadSource) -> i32 {
