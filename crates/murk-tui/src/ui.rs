@@ -12,6 +12,21 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use std::time::{SystemTime, UNIX_EPOCH};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+/// Where things landed on the last frame, so a mouse click can be mapped back
+/// to a buffer, a nick or a link.
+#[derive(Default)]
+pub struct Hits {
+    /// Sidebar rows: (screen row, buffer index).
+    pub buffers: Vec<(u16, usize)>,
+    pub sidebar: Rect,
+    /// Nick list rows: (screen row, nick).
+    pub nicks: Vec<(u16, String)>,
+    pub nicklist: Rect,
+    /// Chat rows: (screen row, left edge, the row's text, its message's links).
+    pub chat: Vec<(u16, u16, String, Vec<String>)>,
+    pub chat_area: Rect,
+}
+
 const SIDEBAR: u16 = 20;
 const NICKLIST: u16 = 18;
 
@@ -272,7 +287,8 @@ fn wrap(spans: Vec<Span<'static>>, width: usize, indent: usize) -> Vec<Line<'sta
     rows.into_iter().map(Line::from).collect()
 }
 
-pub fn draw(f: &mut Frame, app: &mut App, media: &mut Media, tz_offset: i64) {
+pub fn draw(f: &mut Frame, app: &mut App, media: &mut Media, hits: &mut Hits, tz_offset: i64) {
+    *hits = Hits::default();
     let theme = &theme_named(&app.config.ui.theme);
     let area = f.area();
     let [main, status, input] = Layout::vertical([
@@ -298,11 +314,11 @@ pub fn draw(f: &mut Frame, app: &mut App, media: &mut Media, tz_offset: i64) {
     .areas(main);
 
     if sidebar > 0 {
-        draw_buffers(f, app, side, theme);
+        draw_buffers(f, app, side, theme, hits);
     }
-    draw_chat(f, app, media, chat, theme, tz_offset);
+    draw_chat(f, app, media, hits, chat, theme, tz_offset);
     if show_nicks {
-        draw_nicks(f, app, nicks, theme);
+        draw_nicks(f, app, nicks, theme, hits);
     }
     draw_status(f, app, status, theme);
 
@@ -335,7 +351,11 @@ pub fn draw(f: &mut Frame, app: &mut App, media: &mut Media, tz_offset: i64) {
     f.set_cursor_position((input.x + (pw + cursor - skip_cols) as u16, input.y));
 }
 
-fn draw_buffers(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
+fn draw_buffers(f: &mut Frame, app: &App, area: Rect, theme: &Theme, hits: &mut Hits) {
+    hits.sidebar = area;
+    for i in 0..app.buffers.len().min(area.height as usize) {
+        hits.buffers.push((area.y + i as u16, i));
+    }
     let items: Vec<ListItem> = app
         .buffers
         .iter()
@@ -389,10 +409,19 @@ fn draw_buffers(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
     );
 }
 
+/// Lines whose links are worth clicking: what people said, not server chatter.
+fn summary_links_ok(kind: &LineKind) -> bool {
+    matches!(
+        kind,
+        LineKind::Privmsg | LineKind::Action | LineKind::Notice | LineKind::Topic
+    )
+}
+
 fn draw_chat(
     f: &mut Frame,
     app: &mut App,
     media: &mut Media,
+    hits: &mut Hits,
     area: Rect,
     theme: &Theme,
     tz_offset: i64,
@@ -418,6 +447,8 @@ fn draw_chat(
     let mut rows: Vec<Line<'static>> = Vec::new();
     // For each row, the picture whose top edge sits on it: (url, indent).
     let mut marks: Vec<Option<(String, u16)>> = Vec::new();
+    // For each row, the links of the message it belongs to, for clicks.
+    let mut row_links: Vec<Vec<String>> = Vec::new();
     for (i, l) in buf.lines.iter().enumerate().rev() {
         if !show_jp
             && matches!(
@@ -542,6 +573,14 @@ fn draw_chat(
             rows.push(Line::from(row));
             marks.push(None);
         }
+        let line_links = if summary_links_ok(&l.kind) {
+            crate::media::links(&format::strip(&l.text))
+        } else {
+            Vec::new()
+        };
+        while row_links.len() < rows.len() {
+            row_links.push(line_links.clone());
+        }
         if rows.len() >= need {
             break;
         }
@@ -557,10 +596,24 @@ fn draw_chat(
     let pad = height.saturating_sub(shown);
     let mut lines = vec![Line::from(""); pad];
     lines.extend(visible);
-    f.render_widget(Paragraph::new(lines), area);
+    f.render_widget(Paragraph::new(lines.clone()), area);
 
     // Pictures go on top of their reserved rows, only when wholly on screen:
     // graphics protocols cannot draw part of an image.
+    // Remember each visible row for clicks: bottom row first in `rows` order.
+    hits.chat_area = area;
+    for k in 0..shown {
+        let idx = scroll + (shown - 1 - k);
+        let text: String = lines[pad + k]
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        let links = row_links.get(idx).cloned().unwrap_or_default();
+        hits.chat
+            .push((area.y + (pad + k) as u16, area.x, text, links));
+    }
+
     media.drawn.clear();
     for (idx, mark) in marks.iter().enumerate() {
         let Some((url, indent)) = mark else { continue };
@@ -593,7 +646,8 @@ fn draw_chat(
     }
 }
 
-fn draw_nicks(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
+fn draw_nicks(f: &mut Frame, app: &App, area: Rect, theme: &Theme, hits: &mut Hits) {
+    hits.nicklist = area;
     let Some(b) = app.current() else { return };
     let Some(name) = &b.name else { return };
     let members = app
@@ -618,6 +672,14 @@ fn draw_nicks(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
             ]))
         })
         .collect();
+    // The block's title takes the top row, so names start one below it.
+    for (k, m) in members
+        .iter()
+        .take(area.height.saturating_sub(1) as usize)
+        .enumerate()
+    {
+        hits.nicks.push((area.y + 1 + k as u16, m.nick.clone()));
+    }
     let title = format!(" {} users ", members.len());
     f.render_widget(
         List::new(items).block(

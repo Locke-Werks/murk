@@ -5,7 +5,8 @@ mod ui;
 
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    Event as TermEvent, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
+    Event as TermEvent, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton,
+    MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
@@ -168,6 +169,7 @@ async fn run(
     let mut input = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let mut last_drawn: Vec<(String, ratatui::layout::Rect)> = Vec::new();
+    let mut hits = ui::Hits::default();
 
     loop {
         // Synchronized output: the terminal shows each frame whole, instead of the
@@ -175,7 +177,7 @@ async fn run(
         // above all) flickers through its cleared area. Terminals that do not know
         // the mode ignore it.
         let _ = execute!(std::io::stdout(), BeginSynchronizedUpdate);
-        terminal.draw(|f| ui::draw(f, app, &mut media, tz_offset))?;
+        terminal.draw(|f| ui::draw(f, app, &mut media, &mut hits, tz_offset))?;
         // Graphics are not cells: a picture that moved or vanished leaves its old
         // pixels behind until something paints over them. Repaint everything then.
         if media.drawn != last_drawn {
@@ -183,7 +185,7 @@ async fn run(
             last_drawn = media.drawn.clone();
             if moved {
                 terminal.clear()?;
-                terminal.draw(|f| ui::draw(f, app, &mut media, tz_offset))?;
+                terminal.draw(|f| ui::draw(f, app, &mut media, &mut hits, tz_offset))?;
             }
         }
         let _ = execute!(std::io::stdout(), EndSynchronizedUpdate);
@@ -231,7 +233,7 @@ async fn run(
                 Err(_) => return Ok(()),
             },
             ev = input.next() => match ev {
-                Some(Ok(e)) => handle_term(app, &mut media, e),
+                Some(Ok(e)) => handle_term(app, &mut media, &hits, e),
                 Some(Err(e)) => return Err(e),
                 None => return Ok(()),
             },
@@ -247,7 +249,7 @@ async fn run(
     }
 }
 
-fn handle_term(app: &mut App, media: &mut media::Media, ev: TermEvent) {
+fn handle_term(app: &mut App, media: &mut media::Media, hits: &ui::Hits, ev: TermEvent) {
     match ev {
         TermEvent::Key(k) if k.kind != KeyEventKind::Release => handle_key(app, media, k),
         TermEvent::Paste(s) => {
@@ -255,17 +257,107 @@ fn handle_term(app: &mut App, media: &mut media::Media, ev: TermEvent) {
             app.editor
                 .insert_str(&s.replace("\r\n", "\n").replace('\n', " "));
         }
-        TermEvent::Mouse(m) => {
-            if let Some(b) = app.buffers.get_mut(app.active) {
-                match m.kind {
-                    MouseEventKind::ScrollUp => b.scroll += 3,
-                    MouseEventKind::ScrollDown => b.scroll = b.scroll.saturating_sub(3),
-                    _ => {}
+        TermEvent::Mouse(m) => match m.kind {
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                // The wheel over the nick list scrolls nothing else.
+                if inside(hits.nicklist, m.column, m.row) {
+                    return;
+                }
+                if let Some(b) = app.buffers.get_mut(app.active) {
+                    if m.kind == MouseEventKind::ScrollUp {
+                        b.scroll += 3;
+                    } else {
+                        b.scroll = b.scroll.saturating_sub(3);
+                    }
                 }
             }
-        }
+            MouseEventKind::Down(MouseButton::Left) => click(app, media, hits, m.column, m.row),
+            _ => {}
+        },
         _ => {}
     }
+}
+
+fn inside(r: ratatui::layout::Rect, x: u16, y: u16) -> bool {
+    x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+}
+
+/// A left click: a buffer in the sidebar switches to it, a nick opens a private
+/// conversation, a link or picture in the chat opens with the system's handler.
+fn click(app: &mut App, media: &media::Media, hits: &ui::Hits, x: u16, y: u16) {
+    if inside(hits.sidebar, x, y) {
+        if let Some((_, i)) = hits.buffers.iter().find(|(row, _)| *row == y) {
+            app.switch(*i);
+        }
+        return;
+    }
+    if inside(hits.nicklist, x, y) {
+        if let Some((_, nick)) = hits.nicks.iter().find(|(row, _)| *row == y) {
+            app.submit_text(&format!("/query {nick}"));
+        }
+        return;
+    }
+    if !inside(hits.chat_area, x, y) {
+        return;
+    }
+    if let Some((url, _)) = media.drawn.iter().find(|(_, r)| inside(*r, x, y)) {
+        open_external(url);
+        return;
+    }
+    let Some((_, left, text, links)) = hits.chat.iter().find(|(row, ..)| *row == y) else {
+        return;
+    };
+    if links.is_empty() {
+        return;
+    }
+    // The run of non-space text under the pointer; a wrapped link shows only
+    // part of itself on a row, so match it as a piece of a link.
+    let col = (x - left) as usize;
+    let mut start = None;
+    let mut word = String::new();
+    let mut at = 0usize;
+    for ch in text.chars() {
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if ch.is_whitespace() {
+            if start.is_some_and(|s| s <= col && col < at) {
+                break;
+            }
+            start = None;
+            word.clear();
+        } else {
+            if start.is_none() {
+                start = Some(at);
+            }
+            word.push(ch);
+        }
+        at += w;
+    }
+    if !start.is_some_and(|s| s <= col && col < at) {
+        return;
+    }
+    let piece = word.trim_matches(|c: char| ".,);:!?'\"".contains(c));
+    if piece.len() < 4 {
+        return;
+    }
+    if let Some(url) = links.iter().find(|u| u.contains(piece)) {
+        open_external(url);
+        app.set_status(format!("Opened {url}"));
+    }
+}
+
+/// Hand a URL to whatever the system opens it with.
+fn open_external(url: &str) {
+    // Not `cmd /c start`: cmd would re-parse the URL, and an `&` in a query
+    // string would end the command there and run the rest.
+    #[cfg(windows)]
+    let cmd = std::process::Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", url])
+        .spawn();
+    #[cfg(target_os = "macos")]
+    let cmd = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let cmd = std::process::Command::new("xdg-open").arg(url).spawn();
+    let _ = cmd;
 }
 
 fn handle_key(app: &mut App, media: &mut media::Media, k: KeyEvent) {
