@@ -4,6 +4,8 @@ use murk_proto::format::{self, Color};
 
 pub const FG: &str = "#cdd6f4";
 pub const OWN: &str = "#89b4fa";
+/// Placeholder link color; the view swaps it for the theme accent (see Core.themed).
+pub const LINK: &str = "#0a0b0c";
 
 const NICK_PALETTE: [&str; 12] = [
     "#f5e0dc", "#f2cdcd", "#f5c2e7", "#cba6f7", "#f38ba8", "#eba0ac", "#fab387", "#a6e3a1",
@@ -61,7 +63,7 @@ fn linkify(text: &str) -> String {
         }
         let url = &tail[..end];
         let e = escape(url);
-        out.push_str(&format!("<a href=\"{e}\" style=\"color:{OWN}\">{e}</a>"));
+        out.push_str(&format!("<a href=\"{e}\" style=\"color:{LINK}\">{e}</a>"));
         rest = &tail[end..];
     }
     out.push_str(&escape(rest));
@@ -151,7 +153,7 @@ mod tests {
         let s = linkify("see <https://example.com/a?b=1&c=2>, ok");
         assert_eq!(
             s,
-            "see &lt;<a href=\"https://example.com/a?b=1&amp;c=2\" style=\"color:#89b4fa\">https://example.com/a?b=1&amp;c=2</a>&gt;, ok"
+            "see &lt;<a href=\"https://example.com/a?b=1&amp;c=2\" style=\"color:#0a0b0c\">https://example.com/a?b=1&amp;c=2</a>&gt;, ok"
         );
     }
 

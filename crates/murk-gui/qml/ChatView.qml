@@ -111,7 +111,7 @@ Item {
                     Text {
                         Layout.fillWidth: true
                         visible: text.length > 0
-                        text: Core.ctl.topic
+                        text: Core.themed(Core.ctl.topic)
                         textFormat: Text.RichText
                         color: Theme.sub
                         font.family: Theme.uiFont

@@ -234,8 +234,8 @@ Item {
                             prefix = "<span style='color:" + Theme.faint + "'>" + d.time + "</span>&nbsp;&nbsp;"
                                 + (d.kind === "action" ? "" : "<b style='color:" + nc + "'>" + d.sender + "</b>&nbsp;&nbsp;")
                         if (d.kind === "action")
-                            return prefix + "<i><span style='color:" + nc + "'>• " + d.sender + "</span> " + d.body + "</i>"
-                        return prefix + d.body
+                            return prefix + "<i><span style='color:" + nc + "'>• " + d.sender + "</span> " + Core.themed(d.body) + "</i>"
+                        return prefix + Core.themed(d.body)
                     }
                     onLinkActivated: function (link) { Qt.openUrlExternally(link) }
                     HoverHandler { cursorShape: text.hoveredLink ? Qt.PointingHandCursor : Qt.IBeamCursor }
@@ -488,7 +488,7 @@ Item {
                 font.pixelSize: Theme.size + 2
                 color: root.d.kind === "error" ? Theme.bad : Theme.sub
                 selectionColor: Theme.alpha(Theme.accent, 0.35)
-                text: "<span style='color:" + Theme.faint + "'>" + root.d.time + "</span>&nbsp;&nbsp;" + root.d.body
+                text: "<span style='color:" + Theme.faint + "'>" + root.d.time + "</span>&nbsp;&nbsp;" + Core.themed(root.d.body)
                 onLinkActivated: function (link) { Qt.openUrlExternally(link) }
             }
         }

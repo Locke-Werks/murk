@@ -1,3 +1,4 @@
+import QtCore
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
@@ -10,12 +11,24 @@ ApplicationWindow {
     minimumWidth: 760
     minimumHeight: 480
     visible: true
-    title: Core.ctl.title.length ? Core.ctl.title + "  ·  Murk" : "Murk"
+    // Unread messages elsewhere show in the taskbar: "(3) #rust · Murk".
+    readonly property int unreadElsewhere: Core.buffers.reduce((n, b) => n + (b.active || b.muted ? 0 : b.unread), 0)
+    title: (unreadElsewhere > 0 ? "(" + unreadElsewhere + ") " : "")
+        + (Core.ctl.title.length ? Core.ctl.title + "  ·  Murk" : "Murk")
     color: Theme.bg
     font.family: Theme.uiFont
 
     property bool closing: false
     readonly property bool hasBuffers: Core.buffers.length > 0
+
+    // Window size and place survive restarts.
+    Settings {
+        category: "window"
+        property alias x: win.x
+        property alias y: win.y
+        property alias width: win.width
+        property alias height: win.height
+    }
 
     Connections {
         target: Core.ctl

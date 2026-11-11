@@ -24,6 +24,11 @@ QtObject {
     // Anyone can ask for a profile card; Main shows it.
     signal profileRequested(string nick, string color, real x, real y)
 
+    // Rich text from Rust carries a placeholder link color; give links the theme's accent.
+    function themed(html) {
+        return html ? html.replace(/#0a0b0c/g, Theme.accent) : ""
+    }
+
     function set(key, value) {
         ctl.setSetting(key, JSON.stringify(value))
     }
