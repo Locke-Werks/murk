@@ -5,6 +5,7 @@ pub mod app;
 pub mod dcc;
 pub mod editor;
 pub mod emoji;
+pub mod fold;
 
 pub use app::{App, Buffer, Network};
 pub use editor::Editor;

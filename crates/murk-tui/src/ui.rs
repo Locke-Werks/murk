@@ -407,7 +407,7 @@ fn draw_chat(f: &mut Frame, app: &mut App, area: Rect, theme: &Theme, tz_offset:
     // Build rows bottom-up, only as many as needed to fill the view plus the scroll offset.
     let need = height + buf.scroll;
     let mut rows: Vec<Line<'static>> = Vec::new();
-    for l in buf.lines.iter().rev() {
+    for (i, l) in buf.lines.iter().enumerate().rev() {
         if !show_jp
             && matches!(
                 l.kind,
@@ -416,7 +416,24 @@ fn draw_chat(f: &mut Frame, app: &mut App, area: Rect, theme: &Theme, tz_offset:
         {
             continue;
         }
-        let (mut spans, indent) = render_line(theme, l, timestamp(l.time, &fmt, tz_offset));
+        // Runs of joins and parts show once, as a summary on the last line of the run.
+        let (folded, summary) = murk_client::fold::fold_at(&buf.lines, i);
+        if folded {
+            continue;
+        }
+        let (mut spans, indent) = match summary {
+            Some(s) => (
+                vec![
+                    Span::styled(
+                        format!("{} ", timestamp(l.time, &fmt, tz_offset)),
+                        Style::default().fg(theme.dim),
+                    ),
+                    Span::styled(format!("\u{21c5} {s}"), Style::default().fg(theme.dim)),
+                ],
+                0,
+            ),
+            None => render_line(theme, l, timestamp(l.time, &fmt, tz_offset)),
+        };
         // Reactions trail the message: " 👍 2  🎉 1".
         if let Some(rs) = l.msgid.as_deref().and_then(|id| buf.reactions.get(id)) {
             for (emoji, who) in rs {
