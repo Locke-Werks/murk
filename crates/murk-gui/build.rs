@@ -17,6 +17,7 @@ const COMPONENTS: &[&str] = &[
     "qml/Toast.qml",
     "qml/IconButton.qml",
     "qml/Confetti.qml",
+    "qml/SearchPanel.qml",
 ];
 
 fn main() {

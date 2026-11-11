@@ -20,6 +20,8 @@ ApplicationWindow {
     Connections {
         target: Core.ctl
         function onAlert(title, text, index) {
+            if (!(searchPanel.opened && searchPanel.tab === 0))
+                Core.unseenMentions++
             if (!win.active) {
                 Core.ctl.notify(title, text)
                 win.alert(0)
@@ -42,7 +44,7 @@ ApplicationWindow {
         // Anything but an editable field (or a message being selected) hands focus back.
         const editable = f && f.cursorPosition !== undefined && f.readOnly !== true
         const selecting = f && f.readOnly === true && f.selectedText && f.selectedText.length > 0
-        if (!editable && !selecting && !palette.opened && !settings.opened && !networkEditor.opened && !emoji.opened)
+        if (!editable && !selecting && !palette.opened && !settings.opened && !networkEditor.opened && !emoji.opened && !searchPanel.opened)
             Qt.callLater(chat.composer.focusInput)
     }
 
@@ -64,6 +66,8 @@ ApplicationWindow {
     Shortcut { sequences: ["Ctrl+P", "Alt+Up"]; onActivated: Core.ctl.switchRelative(-1) }
     Shortcut { sequence: "Alt+A"; onActivated: Core.ctl.switchActivity() }
     Shortcut { sequence: "Ctrl+,"; onActivated: settings.open() }
+    Shortcut { sequence: "Ctrl+F"; onActivated: searchPanel.openTab(1) }
+    Shortcut { sequence: "Ctrl+Shift+M"; onActivated: searchPanel.openTab(0) }
     Shortcut { sequence: "Ctrl+="; onActivated: Core.set("fontSize", Math.min(16, (Core.settings.fontSize || 11) + 1)) }
     Shortcut { sequence: "Ctrl+-"; onActivated: Core.set("fontSize", Math.max(9, (Core.settings.fontSize || 11) - 1)) }
     Repeater {
@@ -86,6 +90,7 @@ ApplicationWindow {
             onOpenSettings: settings.open()
             onAddNetwork: networkEditor.edit(null)
             onOpenPalette: palette.open()
+            onOpenMentions: searchPanel.openTab(0)
         }
         Rectangle { Layout.fillHeight: true; width: 1; color: Theme.line }
 
@@ -154,6 +159,8 @@ ApplicationWindow {
         parent: Overlay.overlay
         onOpenSettings: settings.open()
         onAddNetwork: networkEditor.edit(null)
+        onOpenMentions: searchPanel.openTab(0)
+        onOpenSearch: searchPanel.openTab(1)
     }
     SettingsPanel {
         id: settings
@@ -161,6 +168,11 @@ ApplicationWindow {
         onEditNetwork: function (net) { settings.close(); networkEditor.edit(net) }
     }
     NetworkEditor { id: networkEditor; parent: Overlay.overlay }
+    SearchPanel {
+        id: searchPanel
+        onOpened: if (tab === 0) Core.unseenMentions = 0
+        onTabChanged: if (tab === 0) Core.unseenMentions = 0
+    }
     EmojiPicker {
         id: emoji
         parent: Overlay.overlay

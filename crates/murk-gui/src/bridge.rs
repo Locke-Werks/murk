@@ -96,6 +96,18 @@ pub mod qobject {
         #[qinvokable]
         fn quick_reactions(self: &Controller) -> QString;
 
+        /// Full-text search of the log: JSON array of hits, newest first.
+        #[qinvokable]
+        fn search(self: &Controller, query: &QString) -> QString;
+
+        /// Every logged line that highlighted us: JSON array, newest first.
+        #[qinvokable]
+        fn mentions(self: &Controller) -> QString;
+
+        /// Switch to a logged buffer by network and buffer name.
+        #[qinvokable]
+        fn open_stored(self: Pin<&mut Controller>, network: &QString, buffer: &QString) -> bool;
+
         /// Fetch a link preview in the background; answers with `preview_ready`.
         #[qinvokable]
         fn request_preview(self: Pin<&mut Controller>, url: &QString);
@@ -181,6 +193,75 @@ fn qs(s: &str) -> QString {
 
 fn json_str(v: &serde_json::Value) -> QString {
     QString::from(v.to_string().as_str())
+}
+
+/// Logged lines for the search and mentions views. Matches of `query` words are marked.
+fn stored_json(hits: &[murk_store::Stored], query: Option<&str>) -> serde_json::Value {
+    let words: Vec<String> = query
+        .map(|q| {
+            q.split_whitespace()
+                .map(|w| w.trim_matches('"').to_lowercase())
+                .filter(|w| w.len() > 1)
+                .collect()
+        })
+        .unwrap_or_default();
+    let mark = |text: &str| -> String {
+        let plain = murk_proto::format::strip(text);
+        if words.is_empty() {
+            return crate::html::escape(&plain);
+        }
+        // Mark case-insensitively on char boundaries of the original text.
+        let lower = plain.to_lowercase();
+        if lower.len() != plain.len() {
+            return crate::html::escape(&plain);
+        }
+        let mut out = String::new();
+        let mut i = 0;
+        while i < plain.len() {
+            let hit = words.iter().find(|w| {
+                lower[i..].starts_with(w.as_str()) && plain.is_char_boundary(i + w.len())
+            });
+            match hit {
+                Some(w) => {
+                    out.push_str(&format!(
+                        "<b><u>{}</u></b>",
+                        crate::html::escape(&plain[i..i + w.len()])
+                    ));
+                    i += w.len();
+                }
+                None => {
+                    let c = plain[i..].chars().next().unwrap();
+                    out.push_str(&crate::html::escape(&c.to_string()));
+                    i += c.len_utf8();
+                }
+            }
+        }
+        out
+    };
+    let v: Vec<_> = hits
+        .iter()
+        .map(|s| {
+            let sender = s.sender.clone().unwrap_or_default();
+            let ms = s
+                .time
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            let t = chrono::DateTime::from_timestamp_millis(ms)
+                .unwrap_or_default()
+                .with_timezone(&chrono::Local);
+            serde_json::json!({
+                "network": s.network,
+                "buffer": s.buffer,
+                "sender": sender,
+                "initial": model::initial(&sender),
+                "color": crate::html::nick_color(&sender),
+                "html": mark(&s.text),
+                "when": t.format("%b %-d, %H:%M").to_string(),
+            })
+        })
+        .collect();
+    v.into()
 }
 
 fn settings_json(app: &App) -> serde_json::Value {
@@ -643,6 +724,35 @@ impl qobject::Controller {
 
     pub fn quick_reactions(&self) -> QString {
         json_str(&murk_client::emoji::QUICK_REACTIONS.into())
+    }
+
+    pub fn search(&self, query: &QString) -> QString {
+        let q = query.to_string();
+        let Some(store) = self.app.as_ref().and_then(|a| a.store.as_ref()) else {
+            return qs("[]");
+        };
+        if q.trim().is_empty() {
+            return qs("[]");
+        }
+        let hits = store.search(&q, None, None, 200).unwrap_or_default();
+        json_str(&stored_json(&hits, Some(&q)))
+    }
+
+    pub fn mentions(&self) -> QString {
+        let Some(store) = self.app.as_ref().and_then(|a| a.store.as_ref()) else {
+            return qs("[]");
+        };
+        json_str(&stored_json(&store.mentions(300).unwrap_or_default(), None))
+    }
+
+    pub fn open_stored(mut self: Pin<&mut Self>, network: &QString, buffer: &QString) -> bool {
+        let (n, b) = (network.to_string(), buffer.to_string());
+        let ok = self
+            .as_mut()
+            .app_mut()
+            .is_some_and(|a| a.open_stored(&n, &b));
+        self.refresh();
+        ok
     }
 
     pub fn request_preview(mut self: Pin<&mut Self>, url: &QString) {

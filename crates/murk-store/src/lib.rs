@@ -205,6 +205,16 @@ impl Store {
         Ok(v)
     }
 
+    /// Lines that highlighted us, newest first, across every network.
+    pub fn mentions(&self, limit: u32) -> Result<Vec<Stored>> {
+        let sql = format!(
+            "SELECT {COLUMNS} FROM messages WHERE highlight = 1 AND own = 0
+             ORDER BY time_ms DESC LIMIT ?1"
+        );
+        let mut stmt = self.conn.prepare_cached(&sql)?;
+        stmt.query_map(params![limit], row)?.collect()
+    }
+
     /// Full-text search using FTS5 query syntax, newest first.
     pub fn search(
         &self,

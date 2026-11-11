@@ -484,6 +484,22 @@ impl App {
         {
             return;
         }
+        // Highlight words count like the nick, and are logged as highlights for the mentions view.
+        if !line.highlight
+            && !line.own
+            && matches!(
+                line.kind,
+                LineKind::Privmsg | LineKind::Notice | LineKind::Action
+            )
+        {
+            let lower = line.text.to_lowercase();
+            line.highlight = self
+                .config
+                .ui
+                .highlights
+                .iter()
+                .any(|w| !w.is_empty() && lower.contains(&w.to_lowercase()));
+        }
         // Already logged means a replay of something we have seen.
         if let Some(store) = &self.store
             && let Ok(None) = store.insert(&net, &line)
@@ -528,13 +544,6 @@ impl App {
             if !keep {
                 return;
             }
-        }
-        if !line.highlight && !line.own {
-            let words = &self.config.ui.highlights;
-            let lower = line.text.to_lowercase();
-            line.highlight = words
-                .iter()
-                .any(|w| !w.is_empty() && lower.contains(&w.to_lowercase()));
         }
         let idx = self.buffer_index(line.network, line.buffer.as_deref());
         let is_active = idx == self.active;
@@ -791,6 +800,22 @@ impl App {
                 active: true,
             },
         );
+    }
+
+    /// Switch to a buffer named the way the store names it. False if the network is not running.
+    pub fn open_stored(&mut self, network: &str, buffer: &str) -> bool {
+        let Some(net) = self
+            .networks
+            .iter()
+            .find(|(_, n)| n.name.eq_ignore_ascii_case(network))
+            .map(|(id, _)| *id)
+        else {
+            return false;
+        };
+        let name = (buffer != murk_store::SERVER_BUFFER).then_some(buffer);
+        let i = self.buffer_index(net, name);
+        self.switch(i);
+        true
     }
 
     /// React to a message in the active buffer.

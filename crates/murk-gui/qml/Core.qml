@@ -18,6 +18,8 @@ QtObject {
 
     // A reply being composed: {msgid, sender, text}, or null.
     property var replyTo: null
+    // Mentions that arrived since the mentions panel was last opened.
+    property int unseenMentions: 0
 
     function set(key, value) {
         ctl.setSetting(key, JSON.stringify(value))

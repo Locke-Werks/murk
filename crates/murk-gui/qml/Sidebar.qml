@@ -8,6 +8,7 @@ Rectangle {
     color: Theme.alpha(Theme.panel, 0.92)
     signal openSettings()
     signal addNetwork()
+    signal openMentions()
     signal openPalette()
 
     ColumnLayout {
@@ -44,13 +45,17 @@ Rectangle {
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
-            IconButton {
+            Row {
                 anchors.right: parent.right
                 anchors.rightMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
-                glyph: "⌕"
-                tip: "Jump to…  (Ctrl+K)"
-                onClicked: root.openPalette()
+                spacing: 2
+                IconButton { glyph: "+"; tip: "Add a network"; onClicked: root.addNetwork() }
+                IconButton {
+                    glyph: "⌕"
+                    tip: "Jump to…  (Ctrl+K)"
+                    onClicked: root.openPalette()
+                }
             }
         }
 
@@ -224,7 +229,20 @@ Rectangle {
                         Layout.fillWidth: true
                     }
                 }
-                IconButton { glyph: "+"; tip: "Add a network"; onClicked: root.addNetwork() }
+                IconButton {
+                    glyph: "🔔"
+                    tip: "Mentions  (Ctrl+Shift+M)"
+                    active: Core.unseenMentions > 0
+                    onClicked: root.openMentions()
+                    Rectangle {
+                        visible: Core.unseenMentions > 0
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        width: 16; height: 16; radius: 8
+                        color: Theme.hl
+                        Text { anchors.centerIn: parent; text: Math.min(Core.unseenMentions, 9); color: Theme.bg; font.pixelSize: 10; font.weight: Font.Bold }
+                    }
+                }
                 IconButton { glyph: "⚙"; tip: "Settings"; onClicked: root.openSettings() }
             }
         }
