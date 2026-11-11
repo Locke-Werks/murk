@@ -333,12 +333,17 @@ fn pulse(lines: &std::collections::VecDeque<murk_core::Line>) -> Vec<u8> {
     let now = std::time::SystemTime::now();
     let mut bins = [0u32; BINS];
     for l in lines.iter().rev() {
-        let Ok(age) = now.duration_since(l.time) else { continue };
+        let Ok(age) = now.duration_since(l.time) else {
+            continue;
+        };
         let age = age.as_secs();
         if age >= SPAN {
             break;
         }
-        if matches!(l.kind, LineKind::Privmsg | LineKind::Action | LineKind::Notice) {
+        if matches!(
+            l.kind,
+            LineKind::Privmsg | LineKind::Action | LineKind::Notice
+        ) {
             bins[BINS - 1 - (age * BINS as u64 / SPAN) as usize] += 1;
         }
     }
@@ -348,7 +353,9 @@ fn pulse(lines: &std::collections::VecDeque<murk_core::Line>) -> Vec<u8> {
     }
     // Scale against a floor so a single line does not look like a riot.
     let top = max.max(6);
-    bins.iter().map(|&n| ((n * 8).div_ceil(top)) as u8).collect()
+    bins.iter()
+        .map(|&n| ((n * 8).div_ceil(top)) as u8)
+        .collect()
 }
 
 fn settings_json(app: &App) -> serde_json::Value {

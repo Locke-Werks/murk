@@ -772,8 +772,10 @@ impl App {
         // Keep lines well under the 512-byte limit.
         for chunk in nicks.chunks(20) {
             let sign = if add { '+' } else { '-' };
-            self.engine
-                .send(network, Command::Raw(format!("MONITOR {sign} {}", chunk.join(","))));
+            self.engine.send(
+                network,
+                Command::Raw(format!("MONITOR {sign} {}", chunk.join(","))),
+            );
         }
     }
 
@@ -794,7 +796,12 @@ impl App {
                 (f.clone(), nets)
             })
             .collect();
-        v.sort_by(|a, b| b.1.is_empty().cmp(&a.1.is_empty()).reverse().then(a.0.cmp(&b.0)));
+        v.sort_by(|a, b| {
+            b.1.is_empty()
+                .cmp(&a.1.is_empty())
+                .reverse()
+                .then(a.0.cmp(&b.0))
+        });
         v
     }
 
@@ -804,7 +811,10 @@ impl App {
         if nick.is_empty() {
             return;
         }
-        self.config.ui.friends.retain(|f| !f.eq_ignore_ascii_case(&nick));
+        self.config
+            .ui
+            .friends
+            .retain(|f| !f.eq_ignore_ascii_case(&nick));
         if friend {
             self.config.ui.friends.push(nick.clone());
         }
@@ -819,9 +829,7 @@ impl App {
             .collect();
         for net in connected {
             self.watch_friends(net, friend, std::slice::from_ref(&nick));
-            if !friend
-                && let Some(list) = self.online.get_mut(&net)
-            {
+            if !friend && let Some(list) = self.online.get_mut(&net) {
                 list.retain(|n| !n.eq_ignore_ascii_case(&nick));
             }
         }
@@ -832,7 +840,9 @@ impl App {
         match (it.next(), it.next()) {
             (Some("add"), Some(n)) => {
                 self.set_friend(n, true);
-                self.info(&format!("{n} is now a friend. You will see when they come online."));
+                self.info(&format!(
+                    "{n} is now a friend. You will see when they come online."
+                ));
             }
             (Some("remove") | Some("del"), Some(n)) => {
                 self.set_friend(n, false);

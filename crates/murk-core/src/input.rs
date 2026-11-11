@@ -42,7 +42,10 @@ pub const HELP: &[(&str, &str)] = &[
     ("msg", "/msg <target> <text>"),
     ("query", "/query <nick> [text]"),
     ("me", "/me <action>"),
-    ("friend", "/friend add|remove <nick>, or /friend to list who is online"),
+    (
+        "friend",
+        "/friend add|remove <nick>, or /friend to list who is online",
+    ),
     ("react", "/react <emoji>: react to the last message"),
     ("reply", "/reply <text>: reply to the last message"),
     (
