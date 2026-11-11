@@ -41,7 +41,7 @@ ApplicationWindow {
                     Core.ctl.notify(title, text)
                 win.alert(0)
             } else if (index !== Core.ctl.active) {
-                toast.show(title, text, index)
+                toast.show(title, text, index, "mention")
             }
         }
         function onFinished() { Qt.quit() }
@@ -64,6 +64,26 @@ ApplicationWindow {
     }
 
     Timer { interval: 1000; running: true; repeat: true; onTriggered: Core.ctl.tick() }
+
+    // A friend coming online gets a toast. Who is already online when we connect
+    // does not: that is the sidebar's job, and a burst of toasts at startup is noise.
+    property var friendsOnline: ({})
+    property bool friendsSettled: false
+    Timer { interval: 15000; running: true; onTriggered: win.friendsSettled = true }
+    Connections {
+        target: Core
+        function onSettingsChanged() {
+            const now = {}
+            for (const f of (Core.settings.friends || []))
+                if (f.online.length)
+                    now[f.nick.toLowerCase()] = f
+            if (win.friendsSettled)
+                for (const k in now)
+                    if (!win.friendsOnline[k])
+                        toast.show(now[k].nick + " is online", "On " + now[k].online.join(", ") + ". Click to say hi.", -1, "friend", now[k].nick)
+            win.friendsOnline = now
+        }
+    }
     // An unresponsive network may delay exit only so long.
     Timer { id: quitDeadline; interval: 12000; onTriggered: Qt.quit() }
 
@@ -194,7 +214,7 @@ ApplicationWindow {
                 }
             }
 
-            Toast {
+            ToastStack {
                 id: toast
                 anchors.right: parent.right
                 anchors.rightMargin: 20
