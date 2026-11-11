@@ -1,0 +1,11 @@
+[package]
+name = "murk-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+murk-core = { version = "0.1.0", path = "../murk-core" }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
+thiserror = "2.0.21"
