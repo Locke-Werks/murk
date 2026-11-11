@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Run by hand, e.g. when a run is lost to a GitHub outage.
+  workflow_dispatch:
 
 env:
   QT_VERSION: 6.8.3
