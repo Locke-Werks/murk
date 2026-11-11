@@ -8,6 +8,7 @@ use crossterm::event::{
     Event as TermEvent, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
 };
 use crossterm::execute;
+use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
 use futures::StreamExt;
 use murk_client::App;
 use murk_config::Config;
@@ -169,6 +170,11 @@ async fn run(
     let mut last_drawn: Vec<(String, ratatui::layout::Rect)> = Vec::new();
 
     loop {
+        // Synchronized output: the terminal shows each frame whole, instead of the
+        // half-drawn state in between. Without it a picture being replaced (video
+        // above all) flickers through its cleared area. Terminals that do not know
+        // the mode ignore it.
+        let _ = execute!(std::io::stdout(), BeginSynchronizedUpdate);
         terminal.draw(|f| ui::draw(f, app, &mut media, tz_offset))?;
         // Graphics are not cells: a picture that moved or vanished leaves its old
         // pixels behind until something paints over them. Repaint everything then.
@@ -180,6 +186,7 @@ async fn run(
                 terminal.draw(|f| ui::draw(f, app, &mut media, tz_offset))?;
             }
         }
+        let _ = execute!(std::io::stdout(), EndSynchronizedUpdate);
         if app.bell {
             app.bell = false;
             let mut out = std::io::stdout();

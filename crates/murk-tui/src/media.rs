@@ -307,12 +307,29 @@ async fn play(
         return;
     };
     let frame_len = (pw * ph * 3) as usize;
-    let mut buf = vec![0u8; frame_len];
+    // ffmpeg paces frames in real time. Read them as fast as they come and keep
+    // only the newest, so a slow encode drops frames instead of turning the
+    // video into slow motion.
+    let (latest_tx, mut latest) = tokio::sync::watch::channel::<Option<Vec<u8>>>(None);
+    let reader = tokio::spawn(async move {
+        loop {
+            let mut buf = vec![0u8; frame_len];
+            if out.read_exact(&mut buf).await.is_err() {
+                break;
+            }
+            if latest_tx.send(Some(buf)).is_err() {
+                break;
+            }
+        }
+    });
     loop {
-        if out.read_exact(&mut buf).await.is_err() {
+        if latest.changed().await.is_err() {
             break;
         }
-        let Some(rgb) = image::RgbImage::from_raw(pw, ph, buf.clone()) else {
+        let Some(buf) = latest.borrow_and_update().clone() else {
+            continue;
+        };
+        let Some(rgb) = image::RgbImage::from_raw(pw, ph, buf) else {
             break;
         };
         let picker = picker.clone();
@@ -329,6 +346,7 @@ async fn play(
             break;
         }
     }
+    reader.abort();
     let _ = child.kill().await;
 }
 
