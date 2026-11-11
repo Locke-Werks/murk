@@ -228,6 +228,11 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PW" "$KEYCHAIN" > /dev/null
           security find-identity -v -p codesigning "$KEYCHAIN"
 
+      # Qt 6.8.3's qyieldcpu.h calls __yield without including <arm_acle.h>, and
+      # the Xcode on macos-26 rejects the implicit declaration.
+      - name: macOS compiler workaround
+        run: echo "CXXFLAGS=-include arm_acle.h" >> "$GITHUB_ENV"
+
       - name: Build and test
         run: |
           export QMAKE="$QT_ROOT_DIR/bin/qmake"

@@ -27,6 +27,12 @@ jobs:
           version: ${{ env.QT_VERSION }}
           modules: qtmultimedia
           cache: true
+      # Qt 6.8.3's qyieldcpu.h calls __yield without including <arm_acle.h>, and
+      # the Xcode on macos-26 rejects the implicit declaration. Pre-including the
+      # header is enough; drop this once Qt is moved past the fix.
+      - name: macOS compiler workaround
+        if: runner.os == 'macOS'
+        run: echo "CXXFLAGS=-include arm_acle.h" >> "$GITHUB_ENV"
       - name: Linux packages
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config libxkbcommon-x11-0
