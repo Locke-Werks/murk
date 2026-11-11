@@ -167,31 +167,47 @@ jobs:
           sed -i 's/^ *//' AppDir/usr/share/applications/murk.desktop
           export QMAKE="$QT_ROOT_DIR/bin/qmake" QML_SOURCES_PATHS=crates/murk-gui/qml
           # murk-gui reaches Qt Multimedia only from QML, so the Qt plugin does not
-          # see it as a dependency and leaves the playback backend out. Ask for it,
-          # and for native Wayland when this Qt has the plugins.
+          # see it as a dependency and leaves the playback backend out. Ask for it.
           modules="multimedia"
-          if ls "$QT_ROOT_DIR/plugins/platforms/libqwayland-generic.so" > /dev/null 2>&1; then
+          # Native Wayland needs four plugin sets together. With the platform plugin
+          # but no graphics integration, Qt cannot make an OpenGL context and
+          # aborts at startup (0.1.1 did). So it is all of them or none, and with
+          # none Qt runs on X11, which every Wayland desktop also provides.
+          P="$QT_ROOT_DIR/plugins"
+          wl_dirs="wayland-graphics-integration-client wayland-shell-integration wayland-decoration-client"
+          wayland=1
+          [ -f "$P/platforms/libqwayland-generic.so" ] || wayland=
+          for d in $wl_dirs; do ls "$P/$d"/*.so > /dev/null 2>&1 || wayland=; done
+          if [ -n "$wayland" ]; then
             modules="$modules;waylandclient"
             export EXTRA_PLATFORM_PLUGINS="libqwayland-generic.so;libqwayland-egl.so"
-            # The platform plugin alone is not enough: without the graphics
-            # integration Qt cannot make an OpenGL context under Wayland and
-            # aborts at startup (0.1.1 did exactly that).
-            export EXTRA_QT_PLUGINS="wayland-graphics-integration-client;wayland-shell-integration;wayland-decoration-client"
-            wayland=1
           fi
+          echo "Native Wayland: ${wayland:-no, X11 only}"
           export EXTRA_QT_MODULES="$modules"
           ./linuxdeploy-x86_64.AppImage --appdir AppDir \
             --executable target/release/murk-gui --executable target/release/murk \
             --desktop-file AppDir/usr/share/applications/murk.desktop \
             --icon-file AppDir/usr/share/icons/hicolor/512x512/apps/murk.png \
-            --plugin qt --output appimage
+            --plugin qt
+          if [ -n "$wayland" ]; then
+            # The Qt plugin does not deploy these on request, so copy them and
+            # let linuxdeploy bring in what they link against.
+            deps=()
+            for d in $wl_dirs; do
+              cp -r "$P/$d" AppDir/usr/plugins/
+              deps+=(--deploy-deps-only "AppDir/usr/plugins/$d")
+            done
+            ./linuxdeploy-x86_64.AppImage --appdir AppDir "${deps[@]}"
+            ls AppDir/usr/plugins/wayland-graphics-integration-client/*.so
+            ls AppDir/usr/plugins/wayland-shell-integration/*.so
+          else
+            # No half-Wayland: remove anything that would make Qt try it.
+            rm -f AppDir/usr/plugins/platforms/libqwayland-*.so
+          fi
           # v0.1.0 shipped without a playback backend and nothing noticed. Fail here.
           ls AppDir/usr/plugins/multimedia/*.so
           ls AppDir/usr/plugins/platforms/
-          if [ -n "${wayland:-}" ]; then
-            ls AppDir/usr/plugins/wayland-graphics-integration-client/*.so
-            ls AppDir/usr/plugins/wayland-shell-integration/*.so
-          fi
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --output appimage
           mv Murk*.AppImage "Murk-$ver-x86_64.AppImage"
           cp target/release/murk "murk-$ver-linux-x86_64"
 
