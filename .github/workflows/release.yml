@@ -231,7 +231,13 @@ jobs:
       # Qt 6.8.3's qyieldcpu.h calls __yield without including <arm_acle.h>, and
       # the Xcode on macos-26 rejects the implicit declaration.
       - name: macOS compiler workaround
-        run: echo "CXXFLAGS=-include arm_acle.h" >> "$GITHUB_ENV"
+        # Qt 6.8.3 also still links Apple's AGL framework, which the macOS 26 SDK
+        # no longer has. Murk never uses it; strip it from this runner's Qt.
+        run: |
+          echo "CXXFLAGS=-include arm_acle.h" >> "$GITHUB_ENV"
+          grep -rlI -- '-framework AGL' "$QT_ROOT_DIR/mkspecs" "$QT_ROOT_DIR/lib" 2>/dev/null \
+            | while read -r f; do sed -i '' 's/-framework AGL//g' "$f"; done
+          ! grep -rqI -- '-framework AGL' "$QT_ROOT_DIR/mkspecs" "$QT_ROOT_DIR/lib"
 
       - name: Build and test
         run: |
