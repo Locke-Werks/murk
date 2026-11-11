@@ -11,6 +11,7 @@ name = "murk-gui"
 path = "src/main.rs"
 
 [dependencies]
+arboard = "3.7.0"
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 cxx = "1.0.205"
 cxx-qt = "0.10.0"
@@ -22,6 +23,7 @@ murk-media = { version = "0.1.0", path = "../murk-media" }
 murk-proto = { version = "0.1.0", path = "../murk-proto" }
 murk-store = { version = "0.1.0", path = "../murk-store" }
 notify-rust = "4.19.0"
+png = "0.18.1"
 serde_json = "1"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 

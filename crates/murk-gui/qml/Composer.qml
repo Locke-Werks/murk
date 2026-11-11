@@ -412,6 +412,16 @@ Rectangle {
                     }
 
                     Keys.onPressed: function (e) {
+                        // A copied screenshot or copied media files upload; text pastes as text.
+                        if (e.matches(StandardKey.Paste) && root.uploadReady) {
+                            const started = JSON.parse(Core.ctl.pasteMedia())
+                            if (started.length) {
+                                for (const s of started)
+                                    uploads.append({ jobId: s.id, name: s.name, progress: 0, error: "" })
+                                e.accepted = true
+                                return
+                            }
+                        }
                         const plain = !(e.modifiers & (Qt.ShiftModifier | Qt.ControlModifier | Qt.AltModifier))
                         if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter) && plain) {
                             if (root.hints.length && input.text.slice(1) !== root.hints[root.hintIndex].name) {

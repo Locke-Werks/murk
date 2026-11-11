@@ -169,6 +169,11 @@ pub mod qobject {
         #[qinvokable]
         fn upload_file(self: Pin<&mut Controller>, file: &QString) -> i32;
 
+        /// Share what is on the clipboard: copied media files, or a copied image.
+        /// JSON `[{id, name}]` of uploads started; empty means paste as text.
+        #[qinvokable]
+        fn paste_media(self: Pin<&mut Controller>) -> QString;
+
         /// Slash commands with usage: JSON `[{name, usage}]`.
         #[qinvokable]
         fn commands(self: &Controller) -> QString;
@@ -375,6 +380,98 @@ fn pulse(lines: &std::collections::VecDeque<murk_core::Line>) -> Vec<u8> {
     bins.iter()
         .map(|&n| ((n * 8).div_ceil(top)) as u8)
         .collect()
+}
+
+enum UploadSource {
+    Path(std::path::PathBuf),
+    Bytes {
+        data: Vec<u8>,
+        name: String,
+        mime: &'static str,
+    },
+}
+
+enum ClipMedia {
+    /// Files copied in a file manager, already filtered to images, video and audio.
+    Files(Vec<std::path::PathBuf>),
+    /// A copied bitmap (a screenshot, "Copy image"), encoded as PNG.
+    Image(Vec<u8>),
+    Nothing,
+}
+
+/// What on the clipboard could be shared as media. Plain text is `Nothing`, so
+/// the caller falls back to an ordinary text paste.
+fn read_clipboard_media() -> ClipMedia {
+    let Ok(mut clip) = arboard::Clipboard::new() else {
+        return ClipMedia::Nothing;
+    };
+    if let Ok(files) = clip.get().file_list() {
+        let media: Vec<_> = files
+            .into_iter()
+            .filter(|p| murk_media::upload::mime_for(p) != "application/octet-stream")
+            .collect();
+        if !media.is_empty() {
+            return ClipMedia::Files(media);
+        }
+    }
+    // A bitmap only counts when there is no text: copying text out of some apps
+    // also places a rendered image of it on the clipboard.
+    if clip.get_text().is_ok_and(|t| !t.trim().is_empty()) {
+        return ClipMedia::Nothing;
+    }
+    match clip.get_image() {
+        Ok(img) => encode_png(img.width as u32, img.height as u32, &img.bytes)
+            .map(ClipMedia::Image)
+            .unwrap_or(ClipMedia::Nothing),
+        Err(_) => ClipMedia::Nothing,
+    }
+}
+
+fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
+    if width == 0 || height == 0 || rgba.len() != (width * height * 4) as usize {
+        return None;
+    }
+    let mut out = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut out, width, height);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut writer = enc.write_header().ok()?;
+        writer.write_image_data(rgba).ok()?;
+    }
+    Some(out)
+}
+
+/// A filename-safe local timestamp for pasted images: 20261111-143005.
+fn chrono_stamp() -> String {
+    let secs = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // UTC is fine here: the name only has to be unique and roughly sortable.
+    let days = secs / 86_400;
+    let rem = secs % 86_400;
+    let (y, m, d) = civil_from_days(days as i64);
+    format!(
+        "{y:04}{m:02}{d:02}-{:02}{:02}{:02}",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
+}
+
+/// Days since 1970-01-01 to a calendar date (Howard Hinnant's algorithm).
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    (y, m, d)
 }
 
 /// QML hands over file:///C:/x on Windows and file:///home/x elsewhere.
@@ -1017,8 +1114,40 @@ impl qobject::Controller {
         self.with_app(|a| a.dcc_send(&nick, &path));
     }
 
-    pub fn upload_file(mut self: Pin<&mut Self>, file: &QString) -> i32 {
+    pub fn upload_file(self: Pin<&mut Self>, file: &QString) -> i32 {
         let path = std::path::PathBuf::from(local_path(&file.to_string()));
+        self.start_upload(UploadSource::Path(path))
+    }
+
+    pub fn paste_media(mut self: Pin<&mut Self>) -> QString {
+        let started: Vec<serde_json::Value> = match read_clipboard_media() {
+            ClipMedia::Files(paths) => paths
+                .into_iter()
+                .filter_map(|p| {
+                    let name = p.file_name()?.to_string_lossy().into_owned();
+                    let id = self.as_mut().start_upload(UploadSource::Path(p));
+                    (id >= 0).then(|| serde_json::json!({ "id": id, "name": name }))
+                })
+                .collect(),
+            ClipMedia::Image(png) => {
+                let name = format!("pasted-{}.png", chrono_stamp());
+                let id = self.as_mut().start_upload(UploadSource::Bytes {
+                    data: png,
+                    name: name.clone(),
+                    mime: "image/png",
+                });
+                if id >= 0 {
+                    vec![serde_json::json!({ "id": id, "name": name })]
+                } else {
+                    Vec::new()
+                }
+            }
+            ClipMedia::Nothing => Vec::new(),
+        };
+        json_str(&serde_json::Value::Array(started))
+    }
+
+    fn start_upload(mut self: Pin<&mut Self>, source: UploadSource) -> i32 {
         let Some(app) = self.app.as_ref() else {
             return -1;
         };
@@ -1053,13 +1182,21 @@ impl qobject::Controller {
         crate::runtime().spawn(async move {
             // Coalesce progress to whole percents so the UI thread is not flooded.
             let last = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(u64::MAX));
-            let result = murk_media::upload::upload(&endpoint, auth, &path, move |sent, total| {
+            let progress = move |sent: u64, total: u64| {
                 let pct = sent * 100 / total.max(1);
                 if last.swap(pct, std::sync::atomic::Ordering::Relaxed) != pct {
                     let _ = qt_progress.queue(move |c| c.upload_progress(id, pct as f64 / 100.0));
                 }
-            })
-            .await;
+            };
+            let result = match source {
+                UploadSource::Path(path) => {
+                    murk_media::upload::upload(&endpoint, auth, &path, progress).await
+                }
+                UploadSource::Bytes { data, name, mime } => {
+                    murk_media::upload::upload_bytes(&endpoint, auth, data, name, mime, progress)
+                        .await
+                }
+            };
             let _ = qt.queue(move |c| match result {
                 Ok(url) => c.upload_finished(id, qs(&url), QString::default()),
                 Err(e) => c.upload_finished(id, QString::default(), qs(&e)),
