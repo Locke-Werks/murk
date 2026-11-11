@@ -1,0 +1,17 @@
+[package]
+name = "murk-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+dirs = "7.0.0"
+keyring = "4.2.0"
+murk-core = { version = "0.1.0", path = "../murk-core" }
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+toml = "1.2.1"
+
+[dev-dependencies]
+tempfile = "3.27.0"

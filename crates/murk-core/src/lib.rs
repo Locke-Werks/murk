@@ -4,6 +4,7 @@ pub mod config;
 pub mod conn;
 pub mod engine;
 pub mod event;
+pub mod input;
 pub mod session;
 pub mod state;
 pub mod time;

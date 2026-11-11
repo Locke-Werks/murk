@@ -125,32 +125,103 @@ impl LineReader {
     }
 }
 
-/// Token-bucket style limiter: each line costs `PENALTY`, and the send clock
-/// may run at most `BURST` ahead of real time.
+/// Raw writer; throttling lives in the writer task.
 pub struct LineWriter {
     inner: WriteHalf<BoxStream>,
-    clock: Instant,
 }
 
-const PENALTY: Duration = Duration::from_millis(2000);
-const BURST: Duration = Duration::from_secs(10);
-
 impl LineWriter {
-    pub async fn send(&mut self, line: &str) -> io::Result<()> {
-        let now = Instant::now();
-        if self.clock < now {
-            self.clock = now;
-        }
-        if self.clock > now + BURST {
-            tokio::time::sleep(self.clock - now - BURST).await;
-        }
-        self.clock += PENALTY;
+    async fn write_line(&mut self, line: &str) -> io::Result<()> {
         let mut bytes = Vec::with_capacity(line.len() + 2);
         bytes.extend_from_slice(line.as_bytes());
         bytes.extend_from_slice(b"\r\n");
         self.inner.write_all(&bytes).await?;
         self.inner.flush().await
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Priority {
+    /// Sent immediately, ahead of the queue and outside the throttle: PONG.
+    /// QUIT is deliberately not urgent, so lines typed before it still go out.
+    Urgent,
+    Normal,
+    /// Dropped when anything else is waiting: typing notifications.
+    Low,
+}
+
+impl Priority {
+    pub fn of(m: &murk_proto::Message) -> Priority {
+        match m.command.as_str() {
+            "PONG" => Priority::Urgent,
+            "TAGMSG" if m.has_tag("+typing") => Priority::Low,
+            _ => Priority::Normal,
+        }
+    }
+}
+
+/// Each throttled line costs `PENALTY`; the send clock may run at most `BURST` ahead of real time.
+const PENALTY: Duration = Duration::from_millis(2000);
+const BURST: Duration = Duration::from_secs(10);
+
+pub type WriteQueue = tokio::sync::mpsc::UnboundedSender<(Priority, String)>;
+
+/// Run the writer on its own task so reading never waits on the throttle.
+/// The task ends when every sender is dropped, or with the first write error.
+pub fn spawn_writer(mut w: LineWriter) -> (WriteQueue, tokio::task::JoinHandle<io::Result<()>>) {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(Priority, String)>();
+    let task = tokio::spawn(async move {
+        let mut queue: std::collections::VecDeque<(Priority, String)> = Default::default();
+        let mut clock = Instant::now();
+        let enqueue = |q: &mut std::collections::VecDeque<(Priority, String)>,
+                       item: (Priority, String)| {
+            if item.0 == Priority::Urgent {
+                let pos = q
+                    .iter()
+                    .position(|(p, _)| *p != Priority::Urgent)
+                    .unwrap_or(q.len());
+                q.insert(pos, item);
+            } else {
+                q.push_back(item);
+            }
+        };
+        loop {
+            while let Ok(item) = rx.try_recv() {
+                enqueue(&mut queue, item);
+            }
+            let Some((prio, line)) = queue.pop_front() else {
+                match rx.recv().await {
+                    Some(item) => enqueue(&mut queue, item),
+                    None => return Ok(()),
+                }
+                continue;
+            };
+            if prio == Priority::Low && !queue.is_empty() {
+                continue;
+            }
+            let now = Instant::now();
+            clock = clock.max(now);
+            if prio != Priority::Urgent && clock > now + BURST {
+                let wait = clock - now - BURST;
+                tokio::select! {
+                    _ = tokio::time::sleep(wait) => {}
+                    item = rx.recv() => {
+                        if let Some(item) = item {
+                            // Re-evaluate: the new item may be urgent.
+                            queue.push_front((prio, line));
+                            enqueue(&mut queue, item);
+                            continue;
+                        }
+                        // All senders gone: drain the rest at the normal pace.
+                        tokio::time::sleep(wait).await;
+                    }
+                }
+            }
+            clock += PENALTY;
+            w.write_line(&line).await?;
+        }
+    });
+    (tx, task)
 }
 
 pub fn split(stream: BoxStream) -> (LineReader, LineWriter) {
@@ -160,9 +231,6 @@ pub fn split(stream: BoxStream) -> (LineReader, LineWriter) {
             inner: BufReader::new(r),
             buf: Vec::with_capacity(1024),
         },
-        LineWriter {
-            inner: w,
-            clock: Instant::now(),
-        },
+        LineWriter { inner: w },
     )
 }

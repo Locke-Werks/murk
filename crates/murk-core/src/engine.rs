@@ -16,6 +16,8 @@ const EVENT_CAPACITY: usize = 4096;
 /// Silence after which we PING the server, and then give up.
 const PING_IDLE: Duration = Duration::from_secs(120);
 const PING_TIMEOUT: Duration = Duration::from_secs(60);
+/// Longest we wait for queued lines (and the QUIT behind them) to be written.
+pub const QUIT_DRAIN: Duration = Duration::from_secs(8);
 
 #[derive(Clone)]
 pub struct Engine {
@@ -189,37 +191,46 @@ async fn run_connection(
     shared: &Arc<RwLock<NetworkState>>,
     events: &broadcast::Sender<Event>,
 ) -> Exit {
-    let (mut reader, mut writer) = conn::split(stream);
+    let (mut reader, writer) = conn::split(stream);
+    let (queue, mut writer_task) = conn::spawn_writer(writer);
     let id = session.id;
 
-    let flush = |out: Output, shared: &Arc<RwLock<NetworkState>>, session: &Session| {
+    // Publish state and events, then queue outgoing lines.
+    let flush = |out: Output, session: &Session| {
         *shared.write().unwrap() = session.state.clone();
         for e in out.events {
             let _ = events.send(e);
         }
-        out.send
+        for m in out.send {
+            let _ = events.send(Event::Raw {
+                network: id,
+                msg: m.clone(),
+                outgoing: true,
+            });
+            let _ = queue.send((conn::Priority::of(&m), m.to_wire()));
+        }
     };
 
-    let start = session.start();
-    for m in flush(start, shared, session) {
-        if let Err(e) = send(&mut writer, &m, id, events).await {
-            return Exit::Lost(e.to_string());
-        }
-    }
+    flush(session.start(), session);
 
     let mut pinged = false;
     loop {
         let timeout = if pinged { PING_TIMEOUT } else { PING_IDLE };
         tokio::select! {
+            res = &mut writer_task => {
+                let detail = match res {
+                    Ok(Err(e)) => e.to_string(),
+                    _ => "writer stopped".to_string(),
+                };
+                return Exit::Lost(detail);
+            }
             line = tokio::time::timeout(timeout, reader.next_line()) => {
                 let line = match line {
                     Err(_) if pinged => return Exit::Lost("ping timeout".into()),
                     Err(_) => {
                         pinged = true;
                         let ping = Message::new("PING", vec!["murk".into()]);
-                        if let Err(e) = send(&mut writer, &ping, id, events).await {
-                            return Exit::Lost(e.to_string());
-                        }
+                        flush(Output { send: vec![ping], events: vec![] }, session);
                         continue;
                     }
                     Ok(Ok(Some(l))) => l,
@@ -229,46 +240,43 @@ async fn run_connection(
                 pinged = false;
                 let Ok(msg) = Message::parse(&line) else { continue };
                 let out = session.handle(&msg);
-                for m in flush(out, shared, session) {
-                    if let Err(e) = send(&mut writer, &m, id, events).await {
-                        return Exit::Lost(e.to_string());
-                    }
-                }
+                flush(out, session);
             }
             cmd = rx.recv() => {
                 let Some(cmd) = cmd else { return Exit::Stop };
-                let quitting = matches!(cmd, Command::Disconnect { .. });
                 if matches!(cmd, Command::Connect) {
                     continue;
                 }
+                let quitting = matches!(cmd, Command::Disconnect { .. });
                 let out = session.command(cmd);
-                for m in flush(out, shared, session) {
-                    if let Err(e) = send(&mut writer, &m, id, events).await {
-                        return Exit::Lost(e.to_string());
-                    }
-                }
+                flush(out, session);
                 if quitting {
-                    // Give the server a moment to close after QUIT.
-                    let _ = tokio::time::timeout(Duration::from_secs(2), async {
-                        while let Ok(Some(_)) = reader.next_line().await {}
-                    }).await;
+                    // Close the queue so the writer exits once QUIT is on the wire, then
+                    // give the server a moment to close. Both waits are bounded.
+                    // Incoming lines are still handled so replies and echoes are not lost.
+                    drop(queue);
+                    let mut deadline = tokio::time::Instant::now() + QUIT_DRAIN;
+                    let mut written = false;
+                    loop {
+                        tokio::select! {
+                            _ = &mut writer_task, if !written => {
+                                written = true;
+                                deadline = deadline.min(tokio::time::Instant::now() + Duration::from_secs(2));
+                            }
+                            line = reader.next_line() => {
+                                let Ok(Some(line)) = line else { break };
+                                let Ok(msg) = Message::parse(&line) else { continue };
+                                for e in session.handle(&msg).events {
+                                    let _ = events.send(e);
+                                }
+                            }
+                            _ = tokio::time::sleep_until(deadline) => break,
+                        }
+                    }
+                    *shared.write().unwrap() = session.state.clone();
                     return Exit::Stop;
                 }
             }
         }
     }
-}
-
-async fn send(
-    writer: &mut conn::LineWriter,
-    m: &Message,
-    network: NetworkId,
-    events: &broadcast::Sender<Event>,
-) -> std::io::Result<()> {
-    let _ = events.send(Event::Raw {
-        network,
-        msg: m.clone(),
-        outgoing: true,
-    });
-    writer.send(&m.to_wire()).await
 }

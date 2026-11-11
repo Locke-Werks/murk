@@ -123,6 +123,11 @@ impl Session {
             .and_then(crate::time::parse)
             .unwrap_or_else(SystemTime::now);
         let own = sender.is_some_and(|s| self.state.is_me(s));
+        let highlight =
+            !own && matches!(
+                kind,
+                LineKind::Privmsg | LineKind::Notice | LineKind::Action
+            ) && self.is_highlight(text);
         let history = m
             .tag("batch")
             .and_then(|b| self.batches.get(b))
@@ -136,7 +141,7 @@ impl Session {
             time,
             msgid: m.tag("msgid").map(str::to_string),
             own,
-            highlight: !own && self.is_highlight(text),
+            highlight,
             history,
         }
     }
