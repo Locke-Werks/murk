@@ -145,11 +145,22 @@ mod imp {
             .ok()
             .and_then(|l| l.split('.').next().map(str::to_string))
             .unwrap_or_else(|| "en_US".into());
+        // Linux distro packages, then Homebrew (Apple Silicon and Intel) and the
+        // per-user folder macOS apps conventionally read Hunspell files from.
+        let home_spelling = std::env::var("HOME")
+            .map(|h| format!("{h}/Library/Spelling"))
+            .unwrap_or_default();
         for dir in [
             "/usr/share/hunspell",
             "/usr/share/myspell",
             "/usr/share/myspell/dicts",
+            "/opt/homebrew/share/hunspell",
+            "/usr/local/share/hunspell",
+            home_spelling.as_str(),
         ] {
+            if dir.is_empty() {
+                continue;
+            }
             for l in [lang.as_str(), "en_US"] {
                 let aff = std::fs::read_to_string(format!("{dir}/{l}.aff"));
                 let dic = std::fs::read_to_string(format!("{dir}/{l}.dic"));
