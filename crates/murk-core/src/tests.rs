@@ -343,3 +343,39 @@ async fn engine_talks_to_a_server() {
     assert!(got.contains(&"CAP END".to_string()));
     assert!(got.contains(&"QUIT bye".to_string()));
 }
+
+#[test]
+fn whois_is_collected_into_one_event() {
+    let mut s = session();
+    register(&mut s);
+    feed(
+        &mut s,
+        ":srv 311 murk alice ~a host.example * :Alice Liddell",
+    );
+    feed(&mut s, ":srv 319 murk alice :@#rust +#murk");
+    feed(&mut s, ":srv 312 murk alice srv.example :Example server");
+    feed(&mut s, ":srv 330 murk alice alice_acct :is logged in as");
+    feed(&mut s, ":srv 671 murk alice :is using a secure connection");
+    feed(&mut s, ":srv 301 murk alice :gone fishing");
+    feed(
+        &mut s,
+        ":srv 317 murk alice 42 1700000000 :seconds idle, signon time",
+    );
+    let out = feed(&mut s, ":srv 318 murk alice :End of /WHOIS list.");
+    let w = out
+        .events
+        .iter()
+        .find_map(|e| match e {
+            Event::Whois { info, .. } => Some(info.clone()),
+            _ => None,
+        })
+        .expect("whois event");
+    assert_eq!(w.realname, "Alice Liddell");
+    assert_eq!(w.channels, vec!["@#rust", "+#murk"]);
+    assert_eq!(w.account.as_deref(), Some("alice_acct"));
+    assert_eq!(w.away.as_deref(), Some("gone fishing"));
+    assert_eq!((w.idle_secs, w.secure), (Some(42), true));
+    // An away reply outside a WHOIS does not start one.
+    let out = feed(&mut s, ":srv 301 murk bob :brb");
+    assert!(!out.events.iter().any(|e| matches!(e, Event::Whois { .. })));
+}

@@ -143,6 +143,8 @@ pub struct Ui {
     pub font_size: u32,
     /// Show linked images and video thumbnails inline. Fetching them reveals your address to the host.
     pub inline_media: bool,
+    /// Buffers that never count as unread or alert, except for direct mentions: "Network/#chan".
+    pub muted: Vec<String>,
 }
 
 impl Default for Ui {
@@ -157,6 +159,7 @@ impl Default for Ui {
             layout: "cozy".into(),
             font_size: 11,
             inline_media: true,
+            muted: Vec::new(),
         }
     }
 }

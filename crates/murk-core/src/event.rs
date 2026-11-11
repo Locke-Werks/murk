@@ -52,6 +52,26 @@ pub struct Line {
     pub reply_to: Option<String>,
 }
 
+/// Everything a WHOIS told us about someone.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Whois {
+    pub nick: String,
+    pub user: String,
+    pub host: String,
+    pub realname: String,
+    pub server: String,
+    pub server_info: String,
+    pub account: Option<String>,
+    pub channels: Vec<String>,
+    pub idle_secs: Option<u64>,
+    /// Unix time they connected.
+    pub signon: Option<u64>,
+    pub away: Option<String>,
+    pub operator: bool,
+    /// Connected over TLS.
+    pub secure: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnState {
     Connecting,
@@ -96,6 +116,11 @@ pub enum Event {
         buffer: String,
         nick: String,
         active: bool,
+    },
+    /// A completed WHOIS reply.
+    Whois {
+        network: NetworkId,
+        info: Whois,
     },
     /// Someone offered a DCC file or chat. Never accepted without the user.
     DccOffer {

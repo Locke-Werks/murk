@@ -518,7 +518,8 @@ impl App {
                     Err(e) => self.local_line(network, Some(from), LineKind::Server, &e),
                 }
             }
-            Event::Topic { .. } | Event::Members { .. } => {}
+            // WHOIS already shows as server text; frontends with profile cards use the event.
+            Event::Topic { .. } | Event::Members { .. } | Event::Whois { .. } => {}
         }
     }
 
@@ -597,11 +598,13 @@ impl App {
             LineKind::Privmsg | LineKind::Notice | LineKind::Action
         ) && !line.own;
         let is_query = line.buffer.is_some() && !self.buffers[idx].is_channel_like();
+        // Muted buffers stay quiet unless someone addresses us directly.
+        let muted = self.is_muted(idx) && !line.highlight;
         let buf = &mut self.buffers[idx];
         if let Some(s) = &line.sender {
             buf.typing.remove(s);
         }
-        if !is_active && counts && !line.history {
+        if !is_active && counts && !line.history && !muted {
             buf.unread += 1;
             if line.highlight || is_query {
                 buf.highlighted = true;
@@ -945,6 +948,51 @@ impl App {
                 active: true,
             },
         );
+    }
+
+    /// Key used for per-buffer settings such as muting: "Network/#chan" or "Network".
+    pub fn buffer_key(&self, idx: usize) -> String {
+        let Some(b) = self.buffers.get(idx) else {
+            return String::new();
+        };
+        let net = self.net_name(b.network);
+        match &b.name {
+            Some(n) => format!("{net}/{}", n.to_lowercase()),
+            None => net,
+        }
+    }
+
+    pub fn is_muted(&self, idx: usize) -> bool {
+        let key = self.buffer_key(idx);
+        self.config
+            .ui
+            .muted
+            .iter()
+            .any(|m| m.eq_ignore_ascii_case(&key))
+    }
+
+    /// Mute or unmute a buffer. The caller saves the config.
+    pub fn set_muted(&mut self, idx: usize, muted: bool) {
+        let key = self.buffer_key(idx);
+        self.config
+            .ui
+            .muted
+            .retain(|m| !m.eq_ignore_ascii_case(&key));
+        if muted {
+            self.config.ui.muted.push(key);
+            if let Some(b) = self.buffers.get_mut(idx) {
+                b.unread = 0;
+                b.highlighted = false;
+            }
+        }
+    }
+
+    pub fn mark_read_at(&mut self, idx: usize) {
+        if let Some(b) = self.buffers.get_mut(idx) {
+            b.unread = 0;
+            b.highlighted = false;
+            b.read_marker = b.lines.back().map(|l| l.time);
+        }
     }
 
     /// Switch to a buffer named the way the store names it. False if the network is not running.

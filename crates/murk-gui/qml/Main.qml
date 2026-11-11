@@ -44,7 +44,7 @@ ApplicationWindow {
         // Anything but an editable field (or a message being selected) hands focus back.
         const editable = f && f.cursorPosition !== undefined && f.readOnly !== true
         const selecting = f && f.readOnly === true && f.selectedText && f.selectedText.length > 0
-        if (!editable && !selecting && !palette.opened && !settings.opened && !networkEditor.opened && !emoji.opened && !searchPanel.opened)
+        if (!editable && !selecting && !palette.opened && !settings.opened && !networkEditor.opened && !emoji.opened && !searchPanel.opened && !profile.opened)
             Qt.callLater(chat.composer.focusInput)
     }
 
@@ -91,6 +91,11 @@ ApplicationWindow {
             onAddNetwork: networkEditor.edit(null)
             onOpenPalette: palette.open()
             onOpenMentions: searchPanel.openTab(0)
+            onEditNetwork: function (name) {
+                const nets = JSON.parse(Core.ctl.networkList())
+                const n = nets.find(x => x.name.toLowerCase() === name.toLowerCase())
+                networkEditor.edit(n || null)
+            }
         }
         Rectangle { Layout.fillHeight: true; width: 1; color: Theme.line }
 
@@ -208,6 +213,14 @@ ApplicationWindow {
         onEditNetwork: function (net) { settings.close(); networkEditor.edit(net) }
     }
     NetworkEditor { id: networkEditor; parent: Overlay.overlay }
+    ProfileCard {
+        id: profile
+        onMention: function (n) { chat.composer.insert(n + ": ") }
+    }
+    Connections {
+        target: Core
+        function onProfileRequested(nick, color, x, y) { profile.show(nick, color, x, y) }
+    }
     SearchPanel {
         id: searchPanel
         onOpened: if (tab === 0) Core.unseenMentions = 0

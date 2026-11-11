@@ -11,7 +11,7 @@ pub mod time;
 
 pub use config::{NetworkConfig, Sasl};
 pub use engine::Engine;
-pub use event::{Command, ConnState, Event, Line, LineKind, NetworkId};
+pub use event::{Command, ConnState, Event, Line, LineKind, NetworkId, Whois};
 pub use murk_proto as proto;
 pub use state::{Channel, Member, NetworkState};
 

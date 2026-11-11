@@ -48,6 +48,10 @@ pub mod qobject {
         #[qsignal]
         fn preview_ready(self: Pin<&mut Controller>, url: QString, preview: QString);
 
+        /// A WHOIS finished: the nick and a JSON profile.
+        #[qsignal]
+        fn whois_ready(self: Pin<&mut Controller>, nick: QString, info: QString);
+
         /// Someone mentioned us or messaged us privately.
         #[qsignal]
         fn alert(self: Pin<&mut Controller>, title: QString, text: QString, index: i32);
@@ -96,6 +100,14 @@ pub mod qobject {
 
         #[qinvokable]
         fn quick_reactions(self: &Controller) -> QString;
+
+        /// Ask the active buffer's network about `nick`; answers with `whois_ready`.
+        #[qinvokable]
+        fn whois(self: Pin<&mut Controller>, nick: &QString);
+
+        /// Sidebar context actions: mute, unmute, read, close, connect, disconnect.
+        #[qinvokable]
+        fn buffer_action(self: Pin<&mut Controller>, index: i32, action: &QString);
 
         #[qinvokable]
         fn dcc_accept(self: Pin<&mut Controller>, id: i32);
@@ -396,6 +408,7 @@ impl qobject::Controller {
 
     fn apply(mut self: Pin<&mut Self>, batch: Vec<Event>) {
         let mut dirty = Vec::new();
+        let mut whois: Vec<murk_core::Whois> = Vec::new();
         let mut alert = None;
         {
             let Some(app) = self.as_mut().app_mut() else {
@@ -428,10 +441,12 @@ impl qobject::Controller {
                                 murk_proto::format::strip(&l.text),
                                 l.network,
                                 l.buffer.clone(),
+                                l.highlight,
                             ));
                         }
                     }
                     Event::React { msgid, .. } => dirty.push(msgid.clone()),
+                    Event::Whois { info, .. } => whois.push(info.clone()),
                     _ => {}
                 }
                 app.handle_event(e);
@@ -439,13 +454,49 @@ impl qobject::Controller {
             app.bell = false;
         }
         self.as_mut().rust_mut().get_mut().dirty.extend(dirty);
-        if let Some((title, text, net, buf)) = alert {
-            let idx = self
+        for w in whois {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let since = |secs: u64| {
+                let d = secs;
+                match d {
+                    0..60 => format!("{d}s"),
+                    60..3600 => format!("{}m", d / 60),
+                    3600..86400 => format!("{}h {}m", d / 3600, (d % 3600) / 60),
+                    _ => format!("{}d {}h", d / 86400, (d % 86400) / 3600),
+                }
+            };
+            let json = serde_json::json!({
+                "nick": w.nick,
+                "initial": model::initial(&w.nick),
+                "color": crate::html::nick_color(&w.nick),
+                "mask": format!("{}@{}", w.user, w.host),
+                "realname": murk_proto::format::strip(&w.realname),
+                "server": w.server,
+                "account": w.account.unwrap_or_default(),
+                "channels": w.channels,
+                "idle": w.idle_secs.map(since).unwrap_or_default(),
+                "online": w.signon.map(|s| since(now.saturating_sub(s))).unwrap_or_default(),
+                "away": w.away.unwrap_or_default(),
+                "operator": w.operator,
+                "secure": w.secure,
+            });
+            self.as_mut().whois_ready(qs(&w.nick), json_str(&json));
+        }
+        if let Some((title, text, net, buf, highlight)) = alert {
+            let (idx, muted) = self
                 .as_mut()
                 .app_mut()
-                .map(|a| a.buffer_index(net, buf.as_deref()) as i32)
-                .unwrap_or(-1);
-            self.as_mut().alert(qs(&title), qs(&text), idx);
+                .map(|a| {
+                    let i = a.buffer_index(net, buf.as_deref());
+                    (i as i32, a.is_muted(i))
+                })
+                .unwrap_or((-1, false));
+            if !muted || highlight {
+                self.as_mut().alert(qs(&title), qs(&text), idx);
+            }
         }
         self.as_mut().refresh();
         let done = self.app.as_ref().is_some_and(|app| {
@@ -490,6 +541,7 @@ impl qobject::Controller {
                 },
                 "active": i == active,
                 "typing": !b.typing.is_empty(),
+                "muted": app.is_muted(i),
             }));
             last_net = Some(b.network);
         }
@@ -803,6 +855,49 @@ impl qobject::Controller {
         json_str(&murk_client::emoji::QUICK_REACTIONS.into())
     }
 
+    pub fn whois(mut self: Pin<&mut Self>, nick: &QString) {
+        let nick = nick.to_string();
+        if nick.is_empty() || nick.contains(char::is_whitespace) {
+            return;
+        }
+        if let Some(app) = self.as_mut().app_mut()
+            && let Some(net) = app.current().map(|b| b.network)
+        {
+            app.engine
+                .send(net, murk_core::Command::Raw(format!("WHOIS {nick} {nick}")));
+        }
+    }
+
+    pub fn buffer_action(mut self: Pin<&mut Self>, index: i32, action: &QString) {
+        let action = action.to_string();
+        let path = self.path.clone();
+        if let Some(app) = self.as_mut().app_mut() {
+            let i = index.max(0) as usize;
+            if i < app.buffers.len() {
+                match action.as_str() {
+                    "mute" | "unmute" => {
+                        app.set_muted(i, action == "mute");
+                        if let Err(e) = app.config.save(&path) {
+                            app.set_status(format!("Could not save settings: {e}"));
+                        }
+                    }
+                    "read" => app.mark_read_at(i),
+                    // These act on a buffer the way typing the command in it would.
+                    "close" | "connect" | "disconnect" => {
+                        let back = app.active;
+                        app.switch(i);
+                        app.submit_text(&format!("/{action}"));
+                        if action != "close" && back < app.buffers.len() {
+                            app.switch(back);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        self.refresh();
+    }
+
     pub fn dcc_accept(self: Pin<&mut Self>, id: i32) {
         self.with_app(|a| a.dcc_accept(Some(id as u32)));
     }
@@ -1005,7 +1100,11 @@ impl qobject::Controller {
                     "nick": n.nick.clone().unwrap_or_default(),
                     "autojoin": n.autojoin.join(" "),
                     "autoconnect": n.autoconnect,
-                    "hasPassword": n.password.is_some() || n.sasl.is_some(),
+                    "hasPassword": n.password.is_some(),
+                    "saslUser": match &n.sasl {
+                        Some(murk_config::SaslConfig::Plain { username, .. }) => username.clone(),
+                        _ => String::new(),
+                    },
                     "connected": matches!(state, Some(ConnState::Connected)),
                 })
             })
@@ -1068,9 +1167,41 @@ impl qobject::Controller {
             .get("autoconnect")
             .and_then(|x| x.as_bool())
             .unwrap_or(true);
+        // Secrets go to the OS keyring (Credential Manager on Windows), never the config file.
         let password = s("password");
         if !password.is_empty() {
-            n.password = Some(murk_config::Secret::Inline(password));
+            match murk_config::Secret::store(&format!("{name}/server"), &password) {
+                Ok(secret) => n.password = Some(secret),
+                Err(e) => {
+                    return qs(&format!(
+                        "Could not save the password to the system keyring: {e}"
+                    ));
+                }
+            }
+        }
+        let sasl_user = s("saslUser");
+        let sasl_pass = s("saslPassword");
+        if sasl_user.is_empty() {
+            n.sasl = None;
+        } else if !sasl_pass.is_empty() {
+            match murk_config::Secret::store(&format!("{name}/sasl"), &sasl_pass) {
+                Ok(secret) => {
+                    n.sasl = Some(murk_config::SaslConfig::Plain {
+                        username: sasl_user,
+                        password: secret,
+                    })
+                }
+                Err(e) => {
+                    return qs(&format!(
+                        "Could not save the password to the system keyring: {e}"
+                    ));
+                }
+            }
+        } else if let Some(murk_config::SaslConfig::Plain { username, .. }) = &mut n.sasl {
+            // Account renamed, password unchanged.
+            *username = sasl_user;
+        } else {
+            return qs("Enter the account password to log in with SASL");
         }
         match existing {
             Some(i) => app.config.networks[i] = n,

@@ -60,6 +60,8 @@ pub struct Session {
     /// Open batches by reference tag: (type, params).
     batches: HashMap<String, (String, Vec<String>)>,
     pub highlights: Vec<String>,
+    /// WHOIS replies being collected, by lowercased nick.
+    whois: HashMap<String, crate::event::Whois>,
 }
 
 impl Session {
@@ -76,6 +78,7 @@ impl Session {
             offered: HashMap::new(),
             nick_attempt: 0,
             batches: HashMap::new(),
+            whois: HashMap::new(),
             highlights: Vec::new(),
         }
     }
@@ -501,6 +504,7 @@ impl Session {
                 self.server_line(&mut out, m, text);
             }
             cmd if cmd.len() == 3 && cmd.bytes().all(|b| b.is_ascii_digit()) => {
+                self.collect_whois(cmd, m, &mut out);
                 // Show remaining numerics without the leading target nick.
                 let text = m
                     .params
@@ -615,6 +619,65 @@ impl Session {
         };
         let l = self.line(Some(buffer), kind, Some(src), text, m);
         out.events.push(Event::Line(l));
+    }
+
+    /// Gather WHOIS replies into one record, published at RPL_ENDOFWHOIS.
+    fn collect_whois(&mut self, cmd: &str, m: &Message, out: &mut Output) {
+        let nick = m.param(1).unwrap_or("").to_string();
+        if nick.is_empty() {
+            return;
+        }
+        let key = nick.to_lowercase();
+        let last = m.params.last().cloned().unwrap_or_default();
+        if cmd == "318" {
+            if let Some(w) = self.whois.remove(&key) {
+                out.events.push(Event::Whois {
+                    network: self.id,
+                    info: w,
+                });
+            }
+            return;
+        }
+        let tracked = [
+            "311", "312", "313", "317", "319", "330", "671", "301", "276", "338",
+        ];
+        if !tracked.contains(&cmd) {
+            return;
+        }
+        // 301 also answers PRIVMSG to an away user; only record it mid-WHOIS.
+        if cmd == "301" && !self.whois.contains_key(&key) {
+            return;
+        }
+        let w = self
+            .whois
+            .entry(key)
+            .or_insert_with(|| crate::event::Whois {
+                nick: nick.clone(),
+                ..Default::default()
+            });
+        match cmd {
+            "311" => {
+                w.user = m.param(2).unwrap_or("").to_string();
+                w.host = m.param(3).unwrap_or("").to_string();
+                w.realname = last;
+            }
+            "312" => {
+                w.server = m.param(2).unwrap_or("").to_string();
+                w.server_info = last;
+            }
+            "313" => w.operator = true,
+            "317" => {
+                w.idle_secs = m.param(2).and_then(|s| s.parse().ok());
+                w.signon = m.param(3).and_then(|s| s.parse().ok());
+            }
+            "319" => w
+                .channels
+                .extend(last.split_whitespace().map(str::to_string)),
+            "330" => w.account = m.param(2).map(str::to_string),
+            "671" | "276" => w.secure = true,
+            "301" => w.away = Some(last),
+            _ => {}
+        }
     }
 
     fn on_mode(&mut self, m: &Message, src: &str, out: &mut Output) {

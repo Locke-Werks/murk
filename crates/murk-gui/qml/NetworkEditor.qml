@@ -36,6 +36,8 @@ Popup {
         nick.text = net ? net.nick : (Core.ctl.nick || "")
         channels.text = net ? net.autojoin : ""
         password.text = ""
+        saslUser.text = net ? (net.saslUser || "") : ""
+        saslPass.text = ""
         autoconnect.checked = net ? net.autoconnect : true
         open()
         if (net)
@@ -48,7 +50,8 @@ Popup {
         const msg = Core.ctl.saveNetwork(JSON.stringify({
             original: original ? original.name : "",
             name: name.text, host: host.text, port: parseInt(port.text) || 6697, tls: tls.checked,
-            nick: nick.text, autojoin: channels.text, password: password.text, autoconnect: autoconnect.checked
+            nick: nick.text, autojoin: channels.text, password: password.text, autoconnect: autoconnect.checked,
+            saslUser: saslUser.text, saslPassword: saslPass.text
         }), true)
         if (msg.length)
             error = msg
@@ -137,8 +140,26 @@ Popup {
         }
         Label { text: "Channels to join" }
         Field { id: channels; placeholderText: "#rust #linux #murk" }
-        Label { text: root.original && root.original.hasPassword ? "Password (saved; leave empty to keep it)" : "Password (server or NickServ, optional)" }
+        GridLayout {
+            Layout.fillWidth: true
+            columns: 2
+            columnSpacing: 12
+            rowSpacing: 6
+            Label { text: "Account (SASL login)" }
+            Label { text: root.original && root.original.saslUser ? "Account password (saved)" : "Account password" }
+            Field { id: saslUser; placeholderText: "your registered nick" }
+            Field { id: saslPass; echoMode: TextInput.Password; placeholderText: root.original && root.original.saslUser ? "leave empty to keep" : "" }
+        }
+        Label { text: root.original && root.original.hasPassword ? "Server password (saved; leave empty to keep it)" : "Server password (rarely needed)" }
         Field { id: password; echoMode: TextInput.Password; placeholderText: "optional" }
+        Text {
+            Layout.fillWidth: true
+            text: "Passwords are kept in your system's credential store, not in the config file."
+            color: Theme.faint
+            font.family: Theme.uiFont
+            font.pixelSize: 11
+            wrapMode: Text.Wrap
+        }
         RowLayout {
             spacing: 18
             Check { id: tls; text: "Use TLS"; checked: true }

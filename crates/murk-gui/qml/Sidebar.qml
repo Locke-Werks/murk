@@ -9,6 +9,47 @@ Rectangle {
     signal openSettings()
     signal addNetwork()
     signal openMentions()
+    signal editNetwork(string name)
+
+    component MenuEntry: MenuItem {
+        id: me
+        property bool danger: false
+        contentItem: Text { text: me.text; color: me.danger ? Theme.bad : Theme.text; font.family: Theme.uiFont; font.pixelSize: 13 }
+        background: Rectangle { radius: 6; color: me.highlighted ? Theme.hover : "transparent" }
+        height: visible ? implicitHeight : 0
+    }
+
+    // Right-click on a buffer.
+    Menu {
+        id: bufferMenu
+        property var target: ({})
+        background: Rectangle { implicitWidth: 220; radius: 10; color: Theme.raised; border.color: Theme.line }
+        MenuEntry {
+            text: bufferMenu.target.muted ? "Unmute" : "Mute (mentions still notify)"
+            onTriggered: Core.ctl.bufferAction(bufferMenu.target.index, bufferMenu.target.muted ? "unmute" : "mute")
+        }
+        MenuEntry {
+            text: "Mark as read"
+            visible: bufferMenu.target.unread > 0
+            onTriggered: Core.ctl.bufferAction(bufferMenu.target.index, "read")
+        }
+        MenuEntry {
+            text: "Edit network…"
+            visible: !!bufferMenu.target.server
+            onTriggered: root.editNetwork(bufferMenu.target.network)
+        }
+        MenuEntry {
+            text: bufferMenu.target.state === "disconnected" ? "Connect" : "Disconnect"
+            visible: !!bufferMenu.target.server
+            onTriggered: Core.ctl.bufferAction(bufferMenu.target.index, bufferMenu.target.state === "disconnected" ? "connect" : "disconnect")
+        }
+        MenuEntry {
+            text: bufferMenu.target.channel ? "Leave channel" : "Close"
+            visible: !bufferMenu.target.server
+            danger: true
+            onTriggered: Core.ctl.bufferAction(bufferMenu.target.index, "close")
+        }
+    }
     signal openPalette()
 
     ColumnLayout {
@@ -101,6 +142,10 @@ Rectangle {
 
                     HoverHandler { id: hover }
                     TapHandler { onTapped: Core.ctl.switchTo(row.modelData.index) }
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: { bufferMenu.target = row.modelData; bufferMenu.popup() }
+                    }
 
                     RowLayout {
                         anchors.fill: parent
@@ -148,8 +193,14 @@ Rectangle {
                             font.letterSpacing: row.modelData.server ? 0.8 : 0
                             color: row.modelData.highlight ? Theme.hl
                                  : row.modelData.active ? Theme.text
-                                 : !row.modelData.joined ? Theme.faint
+                                 : !row.modelData.joined || row.modelData.muted ? Theme.faint
                                  : row.modelData.unread > 0 ? Theme.text : Theme.sub
+                        }
+                        Text {
+                            visible: row.modelData.muted
+                            text: "🔕"
+                            font.pixelSize: 11
+                            opacity: 0.6
                         }
                         // Typing dots.
                         Row {

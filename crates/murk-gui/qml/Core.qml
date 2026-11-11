@@ -21,6 +21,9 @@ QtObject {
     // Mentions that arrived since the mentions panel was last opened.
     property int unseenMentions: 0
 
+    // Anyone can ask for a profile card; Main shows it.
+    signal profileRequested(string nick, string color, real x, real y)
+
     function set(key, value) {
         ctl.setSetting(key, JSON.stringify(value))
     }

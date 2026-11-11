@@ -105,6 +105,13 @@ Item {
                 size: 38
                 letter: root.d.initial
                 tint: root.nickColor
+                TapHandler {
+                    cursorShape: Qt.PointingHandCursor
+                    onTapped: function (ev) {
+                        const p = parent.mapToItem(null, ev.position.x, ev.position.y)
+                        Core.profileRequested(root.d.sender, root.d.color, p.x + 8, p.y + 8)
+                    }
+                }
             }
             Text {
                 visible: root.cozy && root.d.grouped && hover.hovered
@@ -162,7 +169,10 @@ Item {
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: root.view.mention(root.d.sender)
+                            onClicked: function (mouse) {
+                                const p = mapToItem(null, mouse.x, mouse.y)
+                                Core.profileRequested(root.d.sender, root.d.color, p.x + 8, p.y + 8)
+                            }
                         }
                     }
                     Rectangle {

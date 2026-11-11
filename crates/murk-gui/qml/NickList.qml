@@ -103,11 +103,15 @@ Rectangle {
                             }
                         }
                         TapHandler {
+                            onSingleTapped: function (ev) {
+                                const p = parent.mapToItem(null, 0, ev.position.y)
+                                Core.profileRequested(modelData.nick, modelData.color, p.x - 350, p.y)
+                            }
                             onDoubleTapped: Core.ctl.submit("/query " + modelData.nick)
                         }
                         ToolTip.visible: nickHover.hovered
-                        ToolTip.delay: 700
-                        ToolTip.text: (modelData.away ? "Away. " : "") + "Double-click to message"
+                        ToolTip.delay: 900
+                        ToolTip.text: (modelData.away ? "Away. " : "") + "Click for profile, double-click to message"
                     }
                 }
             }
