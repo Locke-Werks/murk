@@ -10,6 +10,7 @@ Rectangle {
     signal addNetwork()
     signal openMentions()
     signal editNetwork(string name)
+    signal openBrowser()
 
     component MenuEntry: MenuItem {
         id: me
@@ -92,6 +93,7 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 2
                 IconButton { glyph: "+"; tip: "Add a network"; onClicked: root.addNetwork() }
+                IconButton { glyph: "◎"; tip: "Explore channels  (Ctrl+J)"; onClicked: root.openBrowser() }
                 IconButton {
                     glyph: "⌕"
                     tip: "Jump to…  (Ctrl+K)"

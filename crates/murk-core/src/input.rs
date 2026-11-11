@@ -37,6 +37,7 @@ impl PartialEq for CommandEq {
 
 pub const HELP: &[(&str, &str)] = &[
     ("join", "/join <#channel>[,#more] [key]"),
+    ("list", "/list [*word*|>users]: find channels"),
     ("part", "/part [#channel] [reason]"),
     ("msg", "/msg <target> <text>"),
     ("query", "/query <nick> [text]"),
@@ -266,6 +267,7 @@ pub fn parse(text: &str, target: Option<&str>, is_channel: impl Fn(&str) -> bool
         "window" | "win" | "w" | "buffer" | "b" if !arg1.is_empty() => Action::Window(arg1.into()),
         "help" | "h" => Action::Help(opt(arg1)),
         "quit" | "exit" => Action::Quit(opt(rest)),
+        "list" => raw(format!("LIST {rest}").trim_end().to_string()),
         other => {
             if HELP.iter().any(|(n, _)| *n == other) {
                 let usage = HELP
@@ -297,6 +299,12 @@ mod tests {
             Action::Send(CommandEq(Command::Raw(r))) => r,
             other => panic!("not raw: {other:?}"),
         }
+    }
+
+    #[test]
+    fn list_goes_to_the_server() {
+        assert_eq!(raw_of(p("/list *rust*")), "LIST *rust*");
+        assert_eq!(raw_of(p("/list")), "LIST");
     }
 
     #[test]

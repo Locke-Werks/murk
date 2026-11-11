@@ -62,6 +62,8 @@ pub struct Session {
     pub highlights: Vec<String>,
     /// WHOIS replies being collected, by lowercased nick.
     whois: HashMap<String, crate::event::Whois>,
+    /// LIST replies gathered until RPL_LISTEND.
+    listing: Vec<crate::event::ListedChannel>,
 }
 
 impl Session {
@@ -79,6 +81,7 @@ impl Session {
             nick_attempt: 0,
             batches: HashMap::new(),
             whois: HashMap::new(),
+            listing: Vec::new(),
             highlights: Vec::new(),
         }
     }
@@ -502,6 +505,25 @@ impl Session {
                     m.params.last().map(String::as_str).unwrap_or("")
                 );
                 self.server_line(&mut out, m, text);
+            }
+            // Channel LIST: gathered and published once, never printed line by line.
+            "321" => self.listing.clear(),
+            "322" => {
+                if self.listing.len() < 50_000 {
+                    self.listing.push(crate::event::ListedChannel {
+                        name: p(1).to_string(),
+                        users: p(2).parse().unwrap_or(0),
+                        topic: m.params.get(3).cloned().unwrap_or_default(),
+                    });
+                }
+            }
+            "323" => {
+                let mut channels = std::mem::take(&mut self.listing);
+                channels.sort_by_key(|c| std::cmp::Reverse(c.users));
+                out.events.push(Event::ChannelList {
+                    network: self.id,
+                    channels,
+                });
             }
             cmd if cmd.len() == 3 && cmd.bytes().all(|b| b.is_ascii_digit()) => {
                 self.collect_whois(cmd, m, &mut out);

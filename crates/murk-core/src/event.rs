@@ -52,6 +52,13 @@ pub struct Line {
     pub reply_to: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ListedChannel {
+    pub name: String,
+    pub users: u32,
+    pub topic: String,
+}
+
 /// Everything a WHOIS told us about someone.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Whois {
@@ -116,6 +123,11 @@ pub enum Event {
         buffer: String,
         nick: String,
         active: bool,
+    },
+    /// A finished LIST reply, busiest channels first.
+    ChannelList {
+        network: NetworkId,
+        channels: Vec<ListedChannel>,
     },
     /// A completed WHOIS reply.
     Whois {

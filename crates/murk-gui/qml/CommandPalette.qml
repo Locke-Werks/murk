@@ -10,6 +10,7 @@ Popup {
     signal addNetwork()
     signal openMentions()
     signal openSearch()
+    signal openBrowser()
 
     modal: true
     focus: true
@@ -40,6 +41,7 @@ Popup {
         a.push({ label: (Core.settings.showJoinsParts === false ? "Show" : "Hide") + " joins and parts", detail: "appearance", icon: "⇆",
                  run: () => Core.set("showJoinsParts", Core.settings.showJoinsParts === false), weight: 0 })
         a.push({ label: "Mentions", detail: "everything that highlighted you", icon: "★", run: () => root.openMentions(), weight: 1 })
+        a.push({ label: "Explore channels", detail: "find somewhere to talk", icon: "◎", run: () => root.openBrowser(), weight: 1 })
         a.push({ label: "Search messages", detail: "full-text, every network", icon: "⌕", run: () => root.openSearch(), weight: 1 })
         a.push({ label: "Settings", detail: "preferences", icon: "⚙", run: () => root.openSettings(), weight: 0 })
         a.push({ label: "Add a network", detail: "connect", icon: "+", run: () => root.addNetwork(), weight: 0 })

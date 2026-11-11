@@ -48,6 +48,10 @@ pub mod qobject {
         #[qsignal]
         fn preview_ready(self: Pin<&mut Controller>, url: QString, preview: QString);
 
+        /// A LIST finished: JSON `[{name, users, topic}]`, busiest first.
+        #[qsignal]
+        fn channel_list(self: Pin<&mut Controller>, channels: QString);
+
         /// A WHOIS finished: the nick and a JSON profile.
         #[qsignal]
         fn whois_ready(self: Pin<&mut Controller>, nick: QString, info: QString);
@@ -410,6 +414,7 @@ impl qobject::Controller {
     fn apply(mut self: Pin<&mut Self>, batch: Vec<Event>) {
         let mut dirty = Vec::new();
         let mut whois: Vec<murk_core::Whois> = Vec::new();
+        let mut listed: Option<Vec<serde_json::Value>> = None;
         let mut alert = None;
         {
             let Some(app) = self.as_mut().app_mut() else {
@@ -448,6 +453,20 @@ impl qobject::Controller {
                     }
                     Event::React { msgid, .. } => dirty.push(msgid.clone()),
                     Event::Whois { info, .. } => whois.push(info.clone()),
+                    Event::ChannelList { channels, .. } => {
+                        listed = Some(
+                            channels
+                                .iter()
+                                .map(|c| {
+                                    serde_json::json!({
+                                        "name": c.name,
+                                        "users": c.users,
+                                        "topic": murk_proto::format::strip(&c.topic),
+                                    })
+                                })
+                                .collect::<Vec<_>>(),
+                        )
+                    }
                     _ => {}
                 }
                 app.handle_event(e);
@@ -455,6 +474,9 @@ impl qobject::Controller {
             app.bell = false;
         }
         self.as_mut().rust_mut().get_mut().dirty.extend(dirty);
+        if let Some(l) = listed {
+            self.as_mut().channel_list(json_str(&l.into()));
+        }
         for w in whois {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

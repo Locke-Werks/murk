@@ -44,7 +44,7 @@ ApplicationWindow {
         // Anything but an editable field (or a message being selected) hands focus back.
         const editable = f && f.cursorPosition !== undefined && f.readOnly !== true
         const selecting = f && f.readOnly === true && f.selectedText && f.selectedText.length > 0
-        if (!editable && !selecting && !palette.opened && !settings.opened && !networkEditor.opened && !emoji.opened && !searchPanel.opened && !profile.opened)
+        if (!editable && !selecting && !palette.opened && !settings.opened && !networkEditor.opened && !emoji.opened && !searchPanel.opened && !profile.opened && !browser.opened)
             Qt.callLater(chat.composer.focusInput)
     }
 
@@ -91,6 +91,7 @@ ApplicationWindow {
             onAddNetwork: networkEditor.edit(null)
             onOpenPalette: palette.open()
             onOpenMentions: searchPanel.openTab(0)
+            onOpenBrowser: browser.open()
             onEditNetwork: function (name) {
                 const nets = JSON.parse(Core.ctl.networkList())
                 const n = nets.find(x => x.name.toLowerCase() === name.toLowerCase())
@@ -206,6 +207,7 @@ ApplicationWindow {
         onAddNetwork: networkEditor.edit(null)
         onOpenMentions: searchPanel.openTab(0)
         onOpenSearch: searchPanel.openTab(1)
+        onOpenBrowser: browser.open()
     }
     SettingsPanel {
         id: settings
@@ -213,6 +215,8 @@ ApplicationWindow {
         onEditNetwork: function (net) { settings.close(); networkEditor.edit(net) }
     }
     NetworkEditor { id: networkEditor; parent: Overlay.overlay }
+    ChannelBrowser { id: browser; parent: Overlay.overlay }
+    Shortcut { sequence: "Ctrl+J"; onActivated: browser.open() }
     ProfileCard {
         id: profile
         onMention: function (n) { chat.composer.insert(n + ": ") }

@@ -68,6 +68,30 @@ fn linkify(text: &str) -> String {
     out
 }
 
+/// Linkify text, rendering `backtick spans` as inline code. An unpaired backtick stays literal.
+fn rich(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(open) = rest.find('`') {
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('`') else { break };
+        if close == 0 {
+            // `` is not a code span.
+            out.push_str(&linkify(&rest[..open + 2]));
+            rest = &after[1..];
+            continue;
+        }
+        out.push_str(&linkify(&rest[..open]));
+        out.push_str(&format!(
+            "<code style=\"font-family:monospace;background-color:rgba(140,140,170,0.22);\">&nbsp;{}&nbsp;</code>",
+            escape(&after[..close])
+        ));
+        rest = &after[close + 1..];
+    }
+    out.push_str(&linkify(rest));
+    out
+}
+
 /// mIRC-formatted text as rich text.
 pub fn styled(text: &str) -> String {
     let mut out = String::new();
@@ -101,7 +125,7 @@ pub fn styled(text: &str) -> String {
         if st.monospace {
             style.push_str("font-family:monospace;");
         }
-        let body = linkify(&s.text.replace('\t', "    "));
+        let body = rich(&s.text.replace('\t', "    "));
         if style.is_empty() {
             out.push_str(&body);
         } else {
@@ -114,6 +138,13 @@ pub fn styled(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inline_code() {
+        let s = rich("run `cargo <build>` now, `` stays, and ` alone");
+        assert!(s.contains("&nbsp;cargo &lt;build&gt;&nbsp;</code>"));
+        assert!(s.ends_with("now, `` stays, and ` alone"));
+    }
 
     #[test]
     fn escapes_and_links() {

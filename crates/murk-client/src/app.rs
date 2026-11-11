@@ -524,6 +524,34 @@ impl App {
                     Err(e) => self.local_line(network, Some(from), LineKind::Server, &e),
                 }
             }
+            Event::ChannelList { network, channels } => {
+                // The desktop client has a browser; here the busiest matches are listed.
+                let total = channels.len();
+                let lines: Vec<String> = channels
+                    .iter()
+                    .take(40)
+                    .map(|c| {
+                        format!(
+                            "{:>6}  {}  {}",
+                            c.users,
+                            c.name,
+                            murk_proto::format::strip(&c.topic)
+                        )
+                    })
+                    .collect();
+                for l in lines {
+                    self.local_line(network, None, LineKind::Server, &l);
+                }
+                let more = total.saturating_sub(40);
+                if more > 0 {
+                    self.local_line(
+                        network,
+                        None,
+                        LineKind::Server,
+                        &format!("...and {more} more. Narrow it with /list *word*"),
+                    );
+                }
+            }
             // WHOIS already shows as server text; frontends with profile cards use the event.
             Event::Topic { .. } | Event::Members { .. } | Event::Whois { .. } => {}
         }
