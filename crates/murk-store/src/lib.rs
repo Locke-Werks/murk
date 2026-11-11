@@ -38,7 +38,38 @@ CREATE TABLE IF NOT EXISTS read_markers (
     time_ms INTEGER NOT NULL,
     PRIMARY KEY (network, buffer)
 );
+CREATE TABLE IF NOT EXISTS reactions (
+    network TEXT NOT NULL,
+    buffer  TEXT NOT NULL,
+    msgid   TEXT NOT NULL,
+    nick    TEXT NOT NULL,
+    emoji   TEXT NOT NULL,
+    time_ms INTEGER NOT NULL,
+    PRIMARY KEY (network, buffer, msgid, nick, emoji)
+);
 ";
+
+/// A JSON array of strings, for passing lists to SQLite's json_each.
+fn serde_json_array(items: &[&str]) -> String {
+    let mut out = String::from("[");
+    for (i, s) in items.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push('"');
+        for c in s.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+    }
+    out.push(']');
+    out
+}
 
 /// The server buffer is stored under this name.
 pub const SERVER_BUFFER: &str = "*server*";
@@ -55,6 +86,7 @@ pub struct Stored {
     pub msgid: Option<String>,
     pub own: bool,
     pub highlight: bool,
+    pub reply_to: Option<String>,
 }
 
 pub struct Store {
@@ -122,7 +154,7 @@ fn decode_kind(kind: &str, extra: Option<String>) -> LineKind {
 }
 
 const COLUMNS: &str =
-    "id, network, buffer, kind, extra, sender, text, time_ms, msgid, own, highlight";
+    "id, network, buffer, kind, extra, sender, text, time_ms, msgid, own, highlight, reply_to";
 
 fn row(r: &rusqlite::Row<'_>) -> Result<Stored> {
     Ok(Stored {
@@ -136,6 +168,7 @@ fn row(r: &rusqlite::Row<'_>) -> Result<Stored> {
         msgid: r.get(8)?,
         own: r.get(9)?,
         highlight: r.get(10)?,
+        reply_to: r.get(11)?,
     })
 }
 
@@ -150,6 +183,8 @@ impl Store {
 
     fn init(conn: Connection) -> Result<Store> {
         conn.execute_batch(SCHEMA)?;
+        // Added after the first release of the schema; fails harmlessly once present.
+        let _ = conn.execute("ALTER TABLE messages ADD COLUMN reply_to TEXT", []);
         Ok(Store { conn })
     }
 
@@ -159,8 +194,8 @@ impl Store {
         let buffer = line.buffer.as_deref().unwrap_or(SERVER_BUFFER);
         let (kind, extra) = encode_kind(&line.kind);
         let n = self.conn.execute(
-            "INSERT OR IGNORE INTO messages (network, buffer, kind, extra, sender, text, time_ms, msgid, own, highlight)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT OR IGNORE INTO messages (network, buffer, kind, extra, sender, text, time_ms, msgid, own, highlight, reply_to)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 network,
                 buffer.to_lowercase(),
@@ -171,7 +206,8 @@ impl Store {
                 to_ms(line.time),
                 line.msgid,
                 line.own,
-                line.highlight
+                line.highlight,
+                line.reply_to
             ],
         )?;
         Ok((n == 1).then(|| self.conn.last_insert_rowid()))
@@ -245,6 +281,49 @@ impl Store {
             ],
             row,
         )?
+        .collect()
+    }
+
+    /// Record a reaction; repeats are ignored.
+    pub fn add_reaction(
+        &self,
+        network: &str,
+        buffer: &str,
+        msgid: &str,
+        nick: &str,
+        emoji: &str,
+    ) -> Result<()> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        self.conn.execute(
+            "INSERT OR IGNORE INTO reactions (network, buffer, msgid, nick, emoji, time_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![network, buffer.to_lowercase(), msgid, nick, emoji, now],
+        )?;
+        Ok(())
+    }
+
+    /// Reactions to any of `msgids` in a buffer: (msgid, emoji, nick), oldest first.
+    pub fn reactions(
+        &self,
+        network: &str,
+        buffer: &str,
+        msgids: &[&str],
+    ) -> Result<Vec<(String, String, String)>> {
+        if msgids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids = serde_json_array(msgids);
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT msgid, emoji, nick FROM reactions
+             WHERE network = ?1 AND buffer = ?2 AND msgid IN (SELECT value FROM json_each(?3))
+             ORDER BY time_ms, rowid",
+        )?;
+        stmt.query_map(params![network, buffer.to_lowercase(), ids], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })?
         .collect()
     }
 
@@ -364,6 +443,23 @@ mod tests {
         };
         s.insert("net", &l).unwrap();
         assert_eq!(s.page("net", "#a", None, 1).unwrap()[0].kind, l.kind);
+    }
+
+    #[test]
+    fn reactions_roundtrip() {
+        let s = Store::in_memory().unwrap();
+        s.add_reaction("net", "#A", "m1", "bob", "👍").unwrap();
+        s.add_reaction("net", "#a", "m1", "bob", "👍").unwrap();
+        s.add_reaction("net", "#a", "m\"2", "amy", "🎉").unwrap();
+        s.add_reaction("net", "#b", "m1", "zed", "🔥").unwrap();
+        let r = s.reactions("net", "#a", &["m1", "m\"2"]).unwrap();
+        assert_eq!(
+            r,
+            vec![
+                ("m1".into(), "👍".into(), "bob".into()),
+                ("m\"2".into(), "🎉".into(), "amy".into()),
+            ]
+        );
     }
 
     #[test]

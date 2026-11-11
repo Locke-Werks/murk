@@ -391,10 +391,50 @@ fn draw_chat(f: &mut Frame, app: &mut App, area: Rect, theme: &Theme, tz_offset:
         {
             continue;
         }
-        let (spans, indent) = render_line(theme, l, timestamp(l.time, &fmt, tz_offset));
+        let (mut spans, indent) = render_line(theme, l, timestamp(l.time, &fmt, tz_offset));
+        // Reactions trail the message: " 👍 2  🎉 1".
+        if let Some(rs) = l.msgid.as_deref().and_then(|id| buf.reactions.get(id)) {
+            for (emoji, who) in rs {
+                spans.push(Span::styled(
+                    format!("  {emoji} {}", who.len()),
+                    Style::default().fg(theme.accent),
+                ));
+            }
+        }
         let mut wrapped = wrap(spans, width, indent);
         wrapped.reverse();
         rows.extend(wrapped);
+        // A reply shows what it answers on the row above it.
+        if let Some(id) = &l.reply_to {
+            let ctx = match buf
+                .lines
+                .iter()
+                .rev()
+                .find(|x| x.msgid.as_deref() == Some(id))
+            {
+                Some(r) => format!(
+                    "{}: {}",
+                    r.sender.as_deref().unwrap_or(""),
+                    format::strip(&r.text)
+                ),
+                None => "an earlier message".into(),
+            };
+            let mut row = vec![
+                Span::raw(" ".repeat(indent.saturating_sub(2))),
+                Span::styled(format!("\u{21b3} {ctx}"), Style::default().fg(theme.dim)),
+            ];
+            // One row only: trim to the width.
+            let mut text: String = row.iter().map(|s| s.content.to_string()).collect();
+            if text.width() > width {
+                text = text
+                    .chars()
+                    .take(width.saturating_sub(1))
+                    .collect::<String>()
+                    + "\u{2026}";
+                row = vec![Span::styled(text, Style::default().fg(theme.dim))];
+            }
+            rows.push(Line::from(row));
+        }
         if rows.len() >= need {
             break;
         }

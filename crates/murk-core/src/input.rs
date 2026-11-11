@@ -41,6 +41,8 @@ pub const HELP: &[(&str, &str)] = &[
     ("msg", "/msg <target> <text>"),
     ("query", "/query <nick> [text]"),
     ("me", "/me <action>"),
+    ("react", "/react <emoji>: react to the last message"),
+    ("reply", "/reply <text>: reply to the last message"),
     ("notice", "/notice <target> <text>"),
     ("nick", "/nick <newnick>"),
     ("topic", "/topic [new topic]"),

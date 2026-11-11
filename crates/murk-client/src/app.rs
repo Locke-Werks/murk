@@ -282,6 +282,12 @@ impl App {
         if let Some(first) = page.first() {
             buf.oldest_id = Some(first.id);
         }
+        let ids: Vec<&str> = page.iter().filter_map(|s| s.msgid.as_deref()).collect();
+        if let Ok(rs) = store.reactions(&net, name, &ids) {
+            for (msgid, emoji, nick) in rs {
+                buf.add_reaction(msgid, emoji, nick);
+            }
+        }
         for s in page.into_iter().rev() {
             buf.rev += 1;
             buf.lines.push_front(Line {
@@ -295,7 +301,7 @@ impl App {
                 own: s.own,
                 highlight: s.highlight,
                 history: true,
-                reply_to: None,
+                reply_to: s.reply_to,
             });
         }
     }
@@ -478,6 +484,10 @@ impl App {
                 nick,
                 emoji,
             } => {
+                if let Some(store) = &self.store {
+                    let net = self.net_name(network);
+                    let _ = store.add_reaction(&net, &buffer, &msgid, &nick, &emoji);
+                }
                 let i = self.buffer_index(network, Some(&buffer));
                 self.buffers[i].add_reaction(msgid, emoji, nick);
             }
@@ -973,6 +983,35 @@ impl App {
             let cmd = cmd.to_lowercase();
             if cmd == "script" || cmd == "scripts" {
                 self.script_command(args.trim());
+                return;
+            }
+            if cmd == "react" || cmd == "reply" {
+                let last = self.current().and_then(|b| {
+                    b.lines
+                        .iter()
+                        .rev()
+                        .find(|l| {
+                            !l.own
+                                && l.msgid.is_some()
+                                && matches!(l.kind, LineKind::Privmsg | LineKind::Action)
+                        })
+                        .and_then(|l| l.msgid.clone())
+                });
+                let args = args.trim();
+                match (last, args.is_empty()) {
+                    (None, _) => self.info("Nothing to respond to here yet"),
+                    (Some(_), true) => self.info(&format!(
+                        "Usage: /{cmd} <{}>",
+                        if cmd == "react" { "emoji" } else { "text" }
+                    )),
+                    (Some(id), false) if cmd == "react" => {
+                        let emoji = crate::emoji::lookup(args.trim_matches(':'))
+                            .unwrap_or(args)
+                            .to_string();
+                        self.react(&id, &emoji);
+                    }
+                    (Some(id), false) => self.reply(&id, args),
+                }
                 return;
             }
             if !input::HELP.iter().any(|(n, _)| *n == cmd)
