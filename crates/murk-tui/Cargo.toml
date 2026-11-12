@@ -11,12 +11,12 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 futures = "0.3.34"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
-murk-client = { version = "0.1.0", path = "../murk-client" }
-murk-config = { version = "0.1.0", path = "../murk-config" }
-murk-core = { version = "0.1.0", path = "../murk-core" }
-murk-media = { version = "0.1.0", path = "../murk-media" }
-murk-proto = { version = "0.1.0", path = "../murk-proto" }
-murk-store = { version = "0.1.0", path = "../murk-store" }
+murk-client = { path = "../murk-client" }
+murk-config = { path = "../murk-config" }
+murk-core = { path = "../murk-core" }
+murk-media = { path = "../murk-media" }
+murk-proto = { path = "../murk-proto" }
+murk-store = { path = "../murk-store" }
 ratatui = "0.30.2"
 ratatui-image = { version = "11.1.0", default-features = false, features = ["crossterm"] }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "sync", "process", "io-util"] }

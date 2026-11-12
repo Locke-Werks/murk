@@ -7,7 +7,7 @@ authors.workspace = true
 
 [dependencies]
 base64 = "0.23.1"
-murk-proto = { version = "0.1.0", path = "../murk-proto" }
+murk-proto = { path = "../murk-proto" }
 rustls-native-certs = "0.8.5"
 rustls-pki-types = "1.16.0"
 thiserror = "2.0.21"

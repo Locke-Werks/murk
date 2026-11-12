@@ -8,7 +8,7 @@ authors.workspace = true
 [dependencies]
 dirs = "7.0.0"
 keyring = "4.2.0"
-murk-core = { version = "0.1.0", path = "../murk-core" }
+murk-core = { path = "../murk-core" }
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
 toml = "1.2.1"

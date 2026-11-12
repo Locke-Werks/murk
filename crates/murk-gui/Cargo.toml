@@ -16,12 +16,12 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 cxx = "1.0.205"
 cxx-qt = "0.10.0"
 cxx-qt-lib = { version = "0.10.0", features = ["qt_gui", "qt_qml", "qt_quickcontrols"] }
-murk-client = { version = "0.1.0", path = "../murk-client" }
-murk-config = { version = "0.1.0", path = "../murk-config" }
-murk-core = { version = "0.1.0", path = "../murk-core" }
-murk-media = { version = "0.1.0", path = "../murk-media" }
-murk-proto = { version = "0.1.0", path = "../murk-proto" }
-murk-store = { version = "0.1.0", path = "../murk-store" }
+murk-client = { path = "../murk-client" }
+murk-config = { path = "../murk-config" }
+murk-core = { path = "../murk-core" }
+murk-media = { path = "../murk-media" }
+murk-proto = { path = "../murk-proto" }
+murk-store = { path = "../murk-store" }
 notify-rust = "4.19.0"
 png = "0.18.1"
 serde_json = "1"
