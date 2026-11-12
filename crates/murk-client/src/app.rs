@@ -440,6 +440,7 @@ impl App {
                 let requested = self.pending_focus.len() != before;
                 let i = self.buffer_index(network, Some(&channel));
                 self.buffers[i].joined = true;
+                self.remember_channel(network, &channel, true);
                 if requested || on_server_buffer {
                     self.switch(i);
                 }
@@ -453,6 +454,7 @@ impl App {
             Event::Parted { network, channel } => {
                 let i = self.buffer_index(network, Some(&channel));
                 self.buffers[i].joined = false;
+                self.remember_channel(network, &channel, false);
                 let name = self.net_name(network);
                 self.script_event(
                     network,
@@ -811,6 +813,33 @@ impl App {
                 .then(a.0.cmp(&b.0))
         });
         v
+    }
+
+    /// Keep a network's autojoin list in step with the channels actually open,
+    /// so the next launch rejoins them. Ad-hoc networks not in the config are
+    /// left alone.
+    fn remember_channel(&mut self, network: NetworkId, channel: &str, open: bool) {
+        let name = self.net_name(network);
+        let Some(net) = self
+            .config
+            .networks
+            .iter_mut()
+            .find(|n| n.name.eq_ignore_ascii_case(&name))
+        else {
+            return;
+        };
+        let had = net.autojoin.iter().any(|c| c.eq_ignore_ascii_case(channel));
+        if open == had {
+            return;
+        }
+        if open {
+            net.autojoin.push(channel.to_string());
+        } else {
+            net.autojoin.retain(|c| !c.eq_ignore_ascii_case(channel));
+        }
+        if let Some(p) = &self.config_path {
+            let _ = self.config.save(p);
+        }
     }
 
     /// Add or remove a friend everywhere, and save.

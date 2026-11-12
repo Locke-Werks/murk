@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/murk-config","crates/murk-core","crates/murk-proto", "crates/murk-store", "crates/murk-tui", "crates/murk-client", "crates/murk-gui", "crates/murk-media", "crates/murk-script", "crates/murk-dcc", "crates/murk-files"]
 
 [workspace.package]
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 authors = ["Locke Werks <archon@lockewerks.com>"]
