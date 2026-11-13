@@ -197,7 +197,7 @@ ApplicationWindow {
                 // Without one, files can only travel by DCC, to one person.
                 readonly property bool canShare: chat.composer.uploadReady
                 onDropped: function (ev) {
-                    if (canShare) {
+                    if (Core.ctl.canUpload()) {
                         chat.composer.uploadFiles(ev.urls)
                         return
                     }

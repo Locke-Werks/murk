@@ -27,7 +27,12 @@ Rectangle {
     // Files on their way to the upload host. Each finished one drops its link into
     // the message, so a caption can go with it before Enter.
     ListModel { id: uploads }
-    readonly property bool uploadReady: Core.settings.uploadReady === true
+    // Depends on the active buffer's network (its FILEHOST arrives in the 005 at
+    // connect), so the listed properties are read only to re-run the check.
+    readonly property bool uploadReady: {
+        Core.ctl.active; Core.ctl.network; Core.ctl.status; Core.settings
+        return Core.ctl.canUpload()
+    }
     function uploadFiles(urls) {
         for (const u of urls) {
             const s = u.toString()
@@ -277,10 +282,10 @@ Rectangle {
                 Layout.bottomMargin: 7
                 glyph: "+"
                 tip: root.uploadReady ? "Share a file, up to 500 MB (or drop it on the window)"
-                                      : "Sharing files needs an upload host: set [upload] in the config"
+                                      : "No file host for this network: click for why"
                 opacity: root.uploadReady ? 1 : 0.45
                 onClicked: {
-                    if (root.uploadReady)
+                    if (Core.ctl.canUpload())
                         picker.open()
                     else
                         Core.ctl.uploadFile("")
@@ -411,7 +416,7 @@ Rectangle {
 
                     Keys.onPressed: function (e) {
                         // A copied screenshot or copied media files upload; text pastes as text.
-                        if (e.matches(StandardKey.Paste) && root.uploadReady) {
+                        if (e.matches(StandardKey.Paste) && Core.ctl.canUpload()) {
                             const started = JSON.parse(Core.ctl.pasteMedia())
                             if (started.length) {
                                 for (const s of started)

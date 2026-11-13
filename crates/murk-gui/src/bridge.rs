@@ -169,6 +169,11 @@ pub mod qobject {
         #[qinvokable]
         fn upload_file(self: Pin<&mut Controller>, file: &QString) -> i32;
 
+        /// Whether a file shared from the active buffer has a host to go to:
+        /// the network's FILEHOST with a SASL PLAIN login, or `[upload]`.
+        #[qinvokable]
+        fn can_upload(self: &Controller) -> bool;
+
         /// Share what is on the clipboard: copied media files, or a copied image.
         /// JSON `[{id, name}]` of uploads started; empty means paste as text.
         #[qinvokable]
@@ -386,52 +391,81 @@ fn pulse(lines: &std::collections::VecDeque<murk_core::Line>) -> Vec<u8> {
         .collect()
 }
 
+/// The FILEHOST URL the active buffer's network advertises (`draft/FILEHOST`,
+/// or soju's `soju.im/FILEHOST`), with the network's display name.
+fn active_filehost(app: &App) -> Option<(String, String)> {
+    let net = app.buffers.get(app.active).map(|b| b.network)?;
+    let url = app
+        .engine
+        .with_state(net, |s| {
+            ["DRAFT/FILEHOST", "SOJU.IM/FILEHOST"]
+                .iter()
+                .find_map(|k| s.isupport.get(k).flatten().map(str::to_string))
+        })
+        .flatten()
+        .filter(|u| u.starts_with("https://"))?;
+    let name = app
+        .networks
+        .get(&net)
+        .map(|n| n.name.clone())
+        .unwrap_or_default();
+    Some((url, name))
+}
+
+/// The SASL PLAIN login configured for the network called `name`.
+fn plain_login(app: &App, name: &str) -> Option<(String, murk_config::Secret)> {
+    let n = app
+        .config
+        .networks
+        .iter()
+        .find(|n| n.name.eq_ignore_ascii_case(name))?;
+    match n.sasl.clone() {
+        Some(murk_config::SaslConfig::Plain { username, password }) => Some((username, password)),
+        _ => None,
+    }
+}
+
+fn upload_configured(app: &App) -> bool {
+    app.config
+        .upload
+        .url
+        .as_ref()
+        .is_some_and(|u| !u.trim().is_empty())
+}
+
+/// Whether a file shared from the active buffer has somewhere to go. Cheap:
+/// it reads no secrets, so the UI can ask on every drop and buffer switch.
+fn upload_ready(app: &App) -> bool {
+    let filehost = active_filehost(app).is_some_and(|(_, name)| plain_login(app, &name).is_some());
+    filehost || upload_configured(app)
+}
+
 /// Where an upload from the active buffer goes, and how it logs in.
 ///
-/// A network that advertises FILEHOST (`draft/FILEHOST`, or soju's
-/// `soju.im/FILEHOST`) gets its own host, logged into with the network's SASL
-/// PLAIN account as the spec describes. Anything else uses `[upload]`.
+/// A network that advertises FILEHOST gets its own host, logged into with the
+/// network's SASL PLAIN account as the spec describes. Anything else uses
+/// `[upload]`. Each refusal names the case it hit, since they need different
+/// fixes.
 fn upload_target(app: &App) -> Result<(String, murk_media::upload::Auth), String> {
     use murk_media::upload::Auth;
-    let network = app.buffers.get(app.active).map(|b| b.network);
-    let filehost = network.and_then(|n| {
-        app.engine
-            .with_state(n, |s| {
-                ["DRAFT/FILEHOST", "SOJU.IM/FILEHOST"]
-                    .iter()
-                    .find_map(|k| s.isupport.get(k).flatten().map(str::to_string))
-            })
-            .flatten()
-    });
-    if let (Some(url), Some(net)) = (filehost.filter(|u| u.starts_with("https://")), network) {
-        let name = app
-            .networks
-            .get(&net)
-            .map(|n| n.name.clone())
-            .unwrap_or_default();
-        let sasl = app
-            .config
-            .networks
-            .iter()
-            .find(|n| n.name.eq_ignore_ascii_case(&name))
-            .and_then(|n| n.sasl.clone());
-        if let Some(murk_config::SaslConfig::Plain { username, password }) = sasl {
+    let filehost = active_filehost(app);
+    if let Some((url, name)) = &filehost {
+        if let Some((user, password)) = plain_login(app, name) {
             let pass = password
                 .resolve()
                 .map_err(|e| format!("Could not read the {name} password: {e}"))?;
-            return Ok((
-                url,
-                Auth::Basic {
-                    user: username,
-                    pass,
-                },
-            ));
+            return Ok((url.clone(), Auth::Basic { user, pass }));
         }
     }
-    let Some(endpoint) = app.config.upload.url.clone() else {
-        return Err(
-            "No upload host here. This network has no FILEHOST; set [upload] in the config.".into(),
-        );
+    let Some(endpoint) = app.config.upload.url.clone().filter(|u| !u.trim().is_empty()) else {
+        return Err(match filehost {
+            Some((_, name)) => format!(
+                "{name} has a file host, but uploading to it needs this network's SASL PLAIN \
+                 login. Set the account and password in the network editor."
+            ),
+            None => "This network has no file host. Set [upload] in the config to share files here."
+                .into(),
+        });
     };
     let auth = match app.config.upload.token.as_ref().map(|t| t.resolve()) {
         Some(Ok(t)) => Auth::Bearer(t),
@@ -551,7 +585,7 @@ fn settings_json(app: &App) -> serde_json::Value {
         "highlights": ui.highlights,
         "inlineMedia": ui.inline_media,
         "notifyDesktop": ui.notify_desktop,
-        "uploadReady": app.config.upload.url.as_ref().is_some_and(|u| !u.trim().is_empty()),
+        "uploadReady": upload_ready(app),
         "friends": app.friends().into_iter()
             .map(|(nick, nets)| serde_json::json!({ "nick": nick, "online": nets }))
             .collect::<Vec<_>>(),
@@ -1173,6 +1207,10 @@ impl qobject::Controller {
     pub fn upload_file(self: Pin<&mut Self>, file: &QString) -> i32 {
         let path = std::path::PathBuf::from(local_path(&file.to_string()));
         self.start_upload(UploadSource::Path(path))
+    }
+
+    pub fn can_upload(&self) -> bool {
+        self.app.as_ref().is_some_and(upload_ready)
     }
 
     pub fn paste_media(mut self: Pin<&mut Self>) -> QString {

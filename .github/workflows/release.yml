@@ -338,7 +338,13 @@ jobs:
           xcrun stapler staple Murk.app
           spctl -a -vvv -t exec Murk.app
           dmg="Murk-$ver-macos-arm64.dmg"
-          hdiutil create -volname Murk -srcfolder Murk.app -ov -format UDZO "$dmg"
+          # The volume shows the app beside a link to /Applications, so
+          # installing is a drag rather than running it off the image.
+          stage="$RUNNER_TEMP/dmg"
+          rm -rf "$stage" && mkdir "$stage"
+          ditto Murk.app "$stage/Murk.app"
+          ln -s /Applications "$stage/Applications"
+          hdiutil create -volname Murk -srcfolder "$stage" -ov -format UDZO "$dmg"
           security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
           codesign --keychain "$KEYCHAIN" -s "Developer ID Application: Joseph Hancuff (KVJL9RB8BY)" --timestamp -f "$dmg"
           notarize "$dmg"
