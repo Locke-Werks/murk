@@ -3,7 +3,7 @@
 
 [product]
 name         = "Murk"
-version      = "0.2.1"
+version      = "0.2.2"
 publisher    = "Locke Werks"
 description  = "An IRC client for the desktop and the terminal."
 copyright    = "Copyright (c) 2026 Locke Werks"

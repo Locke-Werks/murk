@@ -59,8 +59,15 @@ ApplicationWindow {
         // Anything but an editable field (or a message being selected) hands focus back.
         const editable = f && f.cursorPosition !== undefined && f.readOnly !== true
         const selecting = f && f.readOnly === true && f.selectedText && f.selectedText.length > 0
-        if (!editable && !selecting && !palette.opened && !settings.opened && !networkEditor.opened && !emoji.opened && !searchPanel.opened && !profile.opened && !browser.opened && !cheats.opened && !lightbox.opened)
-            Qt.callLater(chat.composer.focusInput)
+        // Never while any popup is open: pulling focus out from under a menu or
+        // panel mid-click is what made their buttons ignore clicks.
+        const popupOpen = win.overlay.children.some(c => c.visible)
+        if (!editable && !selecting && !popupOpen)
+            Qt.callLater(win.returnFocus)
+    }
+    function returnFocus() {
+        if (!(win.overlay.children.some(c => c.visible)))
+            chat.composer.focusInput()
     }
 
     Timer { interval: 1000; running: true; repeat: true; onTriggered: Core.ctl.tick() }

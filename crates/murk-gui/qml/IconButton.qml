@@ -13,6 +13,8 @@ AbstractButton {
     implicitWidth: size
     implicitHeight: size
     hoverEnabled: true
+    // A click must not move keyboard focus off the composer.
+    focusPolicy: Qt.NoFocus
 
     background: Rectangle {
         radius: b.size / 2.6
