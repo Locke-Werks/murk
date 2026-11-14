@@ -287,6 +287,16 @@ fn wrap(spans: Vec<Span<'static>>, width: usize, indent: usize) -> Vec<Line<'sta
     rows.into_iter().map(Line::from).collect()
 }
 
+/// Two short pulses: on, off, on, then done.
+pub const FLASH_PHASE: std::time::Duration = std::time::Duration::from_millis(150);
+
+fn flash_on(flash: Option<std::time::Instant>) -> bool {
+    flash.is_some_and(|t| {
+        let phase = t.elapsed().as_millis() / FLASH_PHASE.as_millis();
+        phase == 0 || phase == 2
+    })
+}
+
 pub fn draw(f: &mut Frame, app: &mut App, media: &mut Media, hits: &mut Hits, tz_offset: i64) {
     *hits = Hits::default();
     let theme = &theme_named(&app.config.ui.theme);
@@ -301,7 +311,7 @@ pub fn draw(f: &mut Frame, app: &mut App, media: &mut Media, hits: &mut Hits, tz
     let show_nicks = app.config.ui.nicklist
         && app.current().is_some_and(|b| b.is_channel_like())
         && main.width > SIDEBAR + NICKLIST + 30;
-    let sidebar = if main.width > SIDEBAR + 30 {
+    let sidebar = if !app.sidebar_hidden && main.width > SIDEBAR + 30 {
         SIDEBAR
     } else {
         0
@@ -321,6 +331,10 @@ pub fn draw(f: &mut Frame, app: &mut App, media: &mut Media, hits: &mut Hits, tz
         draw_nicks(f, app, nicks, theme, hits);
     }
     draw_status(f, app, status, theme);
+    if flash_on(app.flash) {
+        f.buffer_mut()
+            .set_style(status, Style::default().bg(theme.accent).fg(Color::Black));
+    }
 
     let prompt = app
         .current()

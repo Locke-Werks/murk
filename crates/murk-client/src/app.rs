@@ -128,6 +128,10 @@ pub struct App {
     pub status: Option<(String, Instant)>,
     pub quit: bool,
     pub bell: bool,
+    /// When the last incoming message arrived, for the TUI's activity flash.
+    pub flash: Option<Instant>,
+    /// The user hid the buffer list by hand.
+    pub sidebar_hidden: bool,
     last_typing_sent: Option<Instant>,
     /// Protocol traffic log, enabled with MURK_RAW_LOG=<path>.
     raw_log: Option<std::fs::File>,
@@ -172,6 +176,8 @@ impl App {
             status: None,
             quit: false,
             bell: false,
+            flash: None,
+            sidebar_hidden: false,
             last_typing_sent: None,
             pending_focus: Vec::new(),
             raw_log: std::env::var_os("MURK_RAW_LOG").and_then(|p| {
@@ -676,6 +682,10 @@ impl App {
         if let Some(s) = &line.sender {
             buf.typing.remove(s);
         }
+        if counts && !line.history && !muted {
+            self.flash = Some(Instant::now());
+        }
+        let buf = &mut self.buffers[idx];
         if !is_active && counts && !line.history && !muted {
             buf.unread += 1;
             if line.highlight || is_query {

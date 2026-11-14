@@ -244,6 +244,12 @@ async fn run(
                     media.apply(u);
                 }
             }
+            // Redraw at each flash phase boundary until the pulses finish.
+            _ = tokio::time::sleep(ui::FLASH_PHASE / 2), if app.flash.is_some() => {
+                if app.flash.is_some_and(|t| t.elapsed() >= ui::FLASH_PHASE * 3) {
+                    app.flash = None;
+                }
+            }
             _ = tick.tick() => app.tick(),
         }
     }
@@ -386,6 +392,8 @@ fn handle_key(app: &mut App, media: &mut media::Media, k: KeyEvent) {
         KeyCode::Char(d @ '1'..='9') if alt => app.switch(d as usize - '1' as usize),
         KeyCode::Char('0') if alt => app.switch(9),
         KeyCode::Char('a') if alt => app.switch_activity(),
+        KeyCode::Char('l') if alt => app.sidebar_hidden = !app.sidebar_hidden,
+        KeyCode::F(2) => app.sidebar_hidden = !app.sidebar_hidden,
         KeyCode::Char('p') if ctrl => app.switch_relative(-1),
         KeyCode::Char('n') if ctrl => app.switch_relative(1),
         KeyCode::Left if alt => app.switch_relative(-1),
