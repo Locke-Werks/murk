@@ -20,15 +20,23 @@ Rectangle {
         height: visible ? implicitHeight : 0
     }
 
+    component LevelEntry: MenuEntry {
+        property string level
+        property string label
+        visible: !bufferMenu.target.server
+        text: (bufferMenu.target.notify === level ? "✓  " : "     ") + label
+        onTriggered: Core.ctl.bufferAction(bufferMenu.target.index, "notify:" + level)
+    }
+
     // Right-click on a buffer.
     Menu {
         id: bufferMenu
         property var target: ({})
-        background: Rectangle { implicitWidth: 220; radius: 10; color: Theme.raised; border.color: Theme.line }
-        MenuEntry {
-            text: bufferMenu.target.muted ? "Unmute" : "Mute (mentions still notify)"
-            onTriggered: Core.ctl.bufferAction(bufferMenu.target.index, bufferMenu.target.muted ? "unmute" : "mute")
-        }
+        background: Rectangle { implicitWidth: 250; radius: 10; color: Theme.raised; border.color: Theme.line }
+        LevelEntry { level: "all"; label: "Notify on every message" }
+        LevelEntry { level: "default"; label: "Notify on mentions and DMs" }
+        LevelEntry { level: "mentions"; label: "Mute (mentions still notify)" }
+        LevelEntry { level: "none"; label: "Silence completely" }
         MenuEntry {
             text: "Mark as read"
             visible: bufferMenu.target.unread > 0

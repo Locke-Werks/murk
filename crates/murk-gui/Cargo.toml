@@ -22,6 +22,7 @@ murk-core = { path = "../murk-core" }
 murk-media = { path = "../murk-media" }
 murk-proto = { path = "../murk-proto" }
 murk-store = { path = "../murk-store" }
+murk-update = { path = "../murk-update" }
 notify-rust = "4.19.0"
 png = "0.18.1"
 serde_json = "1"

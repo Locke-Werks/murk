@@ -10,6 +10,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 /// Lines kept in memory per buffer; older ones page back in from the store.
 const BUFFER_CAP: usize = 5000;
+const SEARCH_LIMIT: u32 = 30;
 const TYPING_SEND_INTERVAL: Duration = Duration::from_secs(3);
 const TYPING_EXPIRE: Duration = Duration::from_secs(6);
 
@@ -117,6 +118,65 @@ pub struct Network {
     pub detail: Option<String>,
 }
 
+/// How loudly a buffer announces new messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotifyLevel {
+    /// Every message alerts.
+    All,
+    /// Mentions and private messages alert; everything counts as unread.
+    Default,
+    /// Only mentions alert or count.
+    Mentions,
+    /// Nothing alerts or counts.
+    None,
+}
+
+impl NotifyLevel {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "all" => Some(Self::All),
+            "default" | "normal" => Some(Self::Default),
+            "mentions" | "mute" => Some(Self::Mentions),
+            "none" | "off" | "silence" => Some(Self::None),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Default => "default",
+            Self::Mentions => "mentions",
+            Self::None => "none",
+        }
+    }
+}
+
+/// Quote each word so FTS5 treats punctuation as text rather than query syntax.
+pub fn fts_query(text: &str) -> String {
+    text.split_whitespace()
+        .map(|w| format!("\"{}\"", w.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn ago(t: std::time::SystemTime) -> String {
+    let s = t.elapsed().map(|d| d.as_secs()).unwrap_or(0);
+    match s {
+        0..60 => "now".into(),
+        60..3600 => format!("{}m", s / 60),
+        3600..86400 => format!("{}h", s / 3600),
+        _ => format!("{}d", s / 86400),
+    }
+}
+
+/// `/update` asks the frontend, which owns the network and the process, to act.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateRequest {
+    Check,
+    Install,
+}
+
 pub struct App {
     pub engine: Engine,
     pub store: Option<Store>,
@@ -132,6 +192,8 @@ pub struct App {
     pub flash: Option<Instant>,
     /// The user hid the buffer list by hand.
     pub sidebar_hidden: bool,
+    /// The fuzzy buffer switcher, while open.
+    pub switcher: Option<crate::switcher::Switcher>,
     last_typing_sent: Option<Instant>,
     /// Protocol traffic log, enabled with MURK_RAW_LOG=<path>.
     raw_log: Option<std::fs::File>,
@@ -148,6 +210,8 @@ pub struct App {
     closing: Vec<(NetworkId, String)>,
     /// Friends online per network, from MONITOR.
     pub online: HashMap<NetworkId, Vec<String>>,
+    /// Set by `/update`; the frontend takes it.
+    pub update_request: Option<UpdateRequest>,
 }
 
 impl App {
@@ -166,6 +230,7 @@ impl App {
             told_no_reactions: Vec::new(),
             closing: Vec::new(),
             online: HashMap::new(),
+            update_request: None,
             engine,
             store,
             config,
@@ -178,6 +243,7 @@ impl App {
             bell: false,
             flash: None,
             sidebar_hidden: false,
+            switcher: None,
             last_typing_sent: None,
             pending_focus: Vec::new(),
             raw_log: std::env::var_os("MURK_RAW_LOG").and_then(|p| {
@@ -545,6 +611,15 @@ impl App {
                     Err(e) => self.local_line(network, Some(from), LineKind::Server, &e),
                 }
             }
+            Event::DccControl {
+                network,
+                from,
+                control,
+            } => {
+                if let Some(text) = self.transfers.control(network, &from, control, &self.engine) {
+                    self.local_line(network, Some(from), LineKind::Server, &text);
+                }
+            }
             Event::Presence {
                 network,
                 nicks,
@@ -676,8 +751,14 @@ impl App {
             LineKind::Privmsg | LineKind::Notice | LineKind::Action
         ) && !line.own;
         let is_query = line.buffer.is_some() && !self.buffers[idx].is_channel_like();
-        // Muted buffers stay quiet unless someone addresses us directly.
-        let muted = self.is_muted(idx) && !line.highlight;
+        // Muted buffers stay quiet unless someone addresses us directly; silenced ones always do.
+        let level = self.notify_level(idx);
+        let muted = match level {
+            NotifyLevel::None => true,
+            NotifyLevel::Mentions => !line.highlight,
+            _ => false,
+        };
+        let alert_all = level == NotifyLevel::All;
         let buf = &mut self.buffers[idx];
         if let Some(s) = &line.sender {
             buf.typing.remove(s);
@@ -688,7 +769,7 @@ impl App {
         let buf = &mut self.buffers[idx];
         if !is_active && counts && !line.history && !muted {
             buf.unread += 1;
-            if line.highlight || is_query {
+            if line.highlight || is_query || alert_all {
                 buf.highlighted = true;
                 self.bell = true;
             }
@@ -879,6 +960,79 @@ impl App {
             if !friend && let Some(list) = self.online.get_mut(&net) {
                 list.retain(|n| !n.eq_ignore_ascii_case(&nick));
             }
+        }
+    }
+
+    fn notify_command(&mut self, args: &str) {
+        let idx = self.active;
+        if args.is_empty() {
+            let level = self.notify_level(idx).name();
+            self.info(&format!(
+                "Notifications here: {level}. /notify all|default|mentions|none"
+            ));
+            return;
+        }
+        let Some(level) = NotifyLevel::parse(args) else {
+            self.info("Usage: /notify all|default|mentions|none");
+            return;
+        };
+        self.set_notify_level(idx, level);
+        if let Some(p) = &self.config_path
+            && let Err(e) = self.config.save(p)
+        {
+            self.set_status(format!("Could not save settings: {e}"));
+        }
+        self.info(&format!("Notifications here: {}", level.name()));
+    }
+
+    /// Prints log hits into the current buffer; `-here` limits the search to it.
+    fn search_command(&mut self, args: &str) {
+        let (here, words) = match args.split_once(char::is_whitespace) {
+            Some(("-here", rest)) => (true, rest.trim()),
+            _ if args == "-here" => (true, ""),
+            _ => (false, args),
+        };
+        if words.is_empty() {
+            self.info("Usage: /search [-here] <words>");
+            return;
+        }
+        let scope = if here {
+            self.current()
+                .and_then(|b| b.name.clone().map(|n| (self.net_name(b.network), n)))
+        } else {
+            None
+        };
+        let hits = match &self.store {
+            Some(store) => store.search(
+                &fts_query(words),
+                scope.as_ref().map(|s| s.0.as_str()),
+                scope.as_ref().map(|s| s.1.as_str()),
+                SEARCH_LIMIT,
+            ),
+            None => {
+                self.info("Search needs the message log, which is not open.");
+                return;
+            }
+        };
+        let hits = match hits {
+            Ok(h) => h,
+            Err(e) => {
+                self.info(&format!("Search failed: {e}"));
+                return;
+            }
+        };
+        self.info(&format!("{} result(s) for \"{words}\"", hits.len()));
+        // Oldest first so the newest hit lands next to the prompt.
+        for h in hits.iter().rev() {
+            let who = h.sender.as_deref().unwrap_or("*");
+            let line = format!(
+                "  {} {}/{} <{who}> {}",
+                ago(h.time),
+                h.network,
+                h.buffer,
+                murk_proto::format::strip(&h.text)
+            );
+            self.info(&line);
         }
     }
 
@@ -1184,28 +1338,68 @@ impl App {
         }
     }
 
+    /// True for buffers that only alert on mentions, or not at all.
     pub fn is_muted(&self, idx: usize) -> bool {
+        matches!(
+            self.notify_level(idx),
+            NotifyLevel::Mentions | NotifyLevel::None
+        )
+    }
+
+    pub fn notify_level(&self, idx: usize) -> NotifyLevel {
         let key = self.buffer_key(idx);
-        self.config
-            .ui
-            .muted
-            .iter()
-            .any(|m| m.eq_ignore_ascii_case(&key))
+        let has = |list: &[String]| list.iter().any(|m| m.eq_ignore_ascii_case(&key));
+        let ui = &self.config.ui;
+        // Most restrictive wins if a hand-edited config lists a buffer twice.
+        if has(&ui.silenced) {
+            NotifyLevel::None
+        } else if has(&ui.muted) {
+            NotifyLevel::Mentions
+        } else if has(&ui.notify_all) {
+            NotifyLevel::All
+        } else {
+            NotifyLevel::Default
+        }
+    }
+
+    /// The caller saves the config.
+    pub fn set_notify_level(&mut self, idx: usize, level: NotifyLevel) {
+        let key = self.buffer_key(idx);
+        let ui = &mut self.config.ui;
+        for list in [&mut ui.muted, &mut ui.notify_all, &mut ui.silenced] {
+            list.retain(|m| !m.eq_ignore_ascii_case(&key));
+        }
+        match level {
+            NotifyLevel::Default => return,
+            NotifyLevel::All => ui.notify_all.push(key),
+            NotifyLevel::Mentions => ui.muted.push(key),
+            NotifyLevel::None => ui.silenced.push(key),
+        }
+        if self.is_muted(idx)
+            && let Some(b) = self.buffers.get_mut(idx)
+        {
+            b.unread = 0;
+            b.highlighted = false;
+        }
     }
 
     /// Mute or unmute a buffer. The caller saves the config.
     pub fn set_muted(&mut self, idx: usize, muted: bool) {
-        let key = self.buffer_key(idx);
-        self.config
-            .ui
-            .muted
-            .retain(|m| !m.eq_ignore_ascii_case(&key));
-        if muted {
-            self.config.ui.muted.push(key);
-            if let Some(b) = self.buffers.get_mut(idx) {
-                b.unread = 0;
-                b.highlighted = false;
-            }
+        let level = if muted {
+            NotifyLevel::Mentions
+        } else {
+            NotifyLevel::Default
+        };
+        self.set_notify_level(idx, level);
+    }
+
+    /// Whether a line in this buffer should raise a desktop alert.
+    pub fn should_alert(&self, idx: usize, highlight: bool, query: bool) -> bool {
+        match self.notify_level(idx) {
+            NotifyLevel::None => false,
+            NotifyLevel::Mentions => highlight,
+            NotifyLevel::Default => highlight || query,
+            NotifyLevel::All => true,
         }
     }
 
@@ -1456,6 +1650,22 @@ impl App {
                 }
                 return;
             }
+            if cmd == "update" {
+                match args.trim() {
+                    "" | "check" => self.update_request = Some(UpdateRequest::Check),
+                    "install" => self.update_request = Some(UpdateRequest::Install),
+                    _ => self.info("Usage: /update [check|install]"),
+                }
+                return;
+            }
+            if cmd == "notify" {
+                self.notify_command(args.trim());
+                return;
+            }
+            if cmd == "search" || cmd == "grep" {
+                self.search_command(args.trim());
+                return;
+            }
             if cmd == "friend" || cmd == "friends" {
                 self.friend_command(args.trim());
                 return;
@@ -1639,7 +1849,7 @@ impl App {
                     None => {
                         let mut v: Vec<String> =
                             input::HELP.iter().map(|(_, u)| u.to_string()).collect();
-                        v.push("Keys: Alt+1..9 or Ctrl+P/N switch, Alt+A next activity, PgUp/PgDn scroll, Tab complete, Ctrl+C quit".into());
+                        v.push("Keys: Alt+1..9 or Ctrl+P/N switch, Ctrl+G go to buffer, Alt+L or F2 sidebar, Alt+A next activity, PgUp/PgDn scroll, Tab complete, Ctrl+C quit".into());
                         v
                     }
                 };
@@ -1760,6 +1970,65 @@ pub fn mask_matches(mask: &str, nick: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn app() -> App {
+        App::bare(Engine::new(), None, Config::default())
+    }
+
+    #[test]
+    fn notify_levels_round_trip() {
+        let mut a = app();
+        let i = a.buffer_index(1, Some("#rust"));
+        assert_eq!(a.notify_level(i), NotifyLevel::Default);
+        for level in [
+            NotifyLevel::All,
+            NotifyLevel::Mentions,
+            NotifyLevel::None,
+            NotifyLevel::Default,
+        ] {
+            a.set_notify_level(i, level);
+            assert_eq!(a.notify_level(i), level);
+        }
+        // Switching level never leaves the buffer listed twice.
+        a.set_notify_level(i, NotifyLevel::All);
+        a.set_notify_level(i, NotifyLevel::None);
+        let ui = &a.config.ui;
+        assert!(ui.notify_all.is_empty() && ui.muted.is_empty());
+        assert_eq!(ui.silenced.len(), 1);
+    }
+
+    #[test]
+    fn alert_rules_per_level() {
+        let mut a = app();
+        let i = a.buffer_index(1, Some("#rust"));
+        a.set_notify_level(i, NotifyLevel::All);
+        assert!(a.should_alert(i, false, false));
+        a.set_notify_level(i, NotifyLevel::Default);
+        assert!(!a.should_alert(i, false, false));
+        assert!(a.should_alert(i, false, true));
+        a.set_notify_level(i, NotifyLevel::Mentions);
+        assert!(!a.should_alert(i, false, true));
+        assert!(a.should_alert(i, true, false));
+        a.set_notify_level(i, NotifyLevel::None);
+        assert!(!a.should_alert(i, true, true));
+        assert!(a.is_muted(i));
+    }
+
+    #[test]
+    fn fts_query_quotes_words() {
+        assert_eq!(fts_query("foo-bar baz"), "\"foo-bar\" \"baz\"");
+        assert_eq!(fts_query("say \"hi\""), "\"say\" \"\"\"hi\"\"\"");
+    }
+
+    #[test]
+    fn switcher_ranks_names() {
+        let mut a = app();
+        let rust = a.buffer_index(1, Some("#rust"));
+        let off = a.buffer_index(1, Some("#rust-offtopic"));
+        let _ = a.buffer_index(1, Some("#python"));
+        let m = a.switcher_matches("rust");
+        assert_eq!(m, vec![rust, off]);
+    }
 
     #[test]
     fn masks() {

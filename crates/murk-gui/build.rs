@@ -30,6 +30,7 @@ const COMPONENTS: &[&str] = &[
     "qml/CheatSheet.qml",
     "qml/TitleBar.qml",
     "qml/ResizeFrame.qml",
+    "qml/UpdateBanner.qml",
 ];
 
 fn main() {

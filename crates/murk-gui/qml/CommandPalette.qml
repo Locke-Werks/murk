@@ -48,6 +48,7 @@ Popup {
         a.push({ label: "Search messages", detail: "full-text, every network", icon: "⌕", run: () => root.openSearch(), weight: 1 })
         a.push({ label: "Settings", detail: "preferences", icon: "⚙", run: () => root.openSettings(), weight: 0 })
         a.push({ label: "Add a network", detail: "connect", icon: "+", run: () => root.addNetwork(), weight: 0 })
+        a.push({ label: "Check for updates", detail: "Murk " + (Core.settings.version || ""), icon: "↻", run: () => Core.ctl.checkUpdate(true), weight: 0 })
         for (const c of Core.commands)
             a.push({ label: "/" + c.name, detail: c.usage, icon: "/", command: c.name, weight: -1 })
         return a

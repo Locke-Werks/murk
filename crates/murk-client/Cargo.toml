@@ -15,4 +15,4 @@ murk-script = { path = "../murk-script" }
 murk-store = { path = "../murk-store" }
 unicode-width = "0.2.3"
 dirs = "7.0.0"
-tokio = { version = "1.54.1", features = ["rt"] }
+tokio = { version = "1.54.1", features = ["rt", "sync", "time"] }

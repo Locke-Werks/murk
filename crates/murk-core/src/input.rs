@@ -46,6 +46,11 @@ pub const HELP: &[(&str, &str)] = &[
         "friend",
         "/friend add|remove <nick>, or /friend to list who is online",
     ),
+    (
+        "notify",
+        "/notify all|default|mentions|none: how this buffer alerts",
+    ),
+    ("search", "/search [-here] <words>: search the message log"),
     ("react", "/react <emoji>: react to the last message"),
     ("reply", "/reply <text>: reply to the last message"),
     (

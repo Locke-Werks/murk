@@ -368,6 +368,15 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: out
+      # The in-app updater refuses a release without this file, and verifies
+      # every download against it. Bare file names, as sha256sum -c expects.
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          find out -type f -exec sha256sum {} + | sed 's#  .*/#  #' | sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+          test "$(wc -l < SHA256SUMS)" -eq 4
+
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -375,4 +384,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             --title "Murk ${GITHUB_REF_NAME#v}" --generate-notes \
             --notes "The macOS build is signed and notarized but has not been run on a Mac. It is for Apple Silicon only. Reports welcome." \
-            out/windows/* out/linux/* out/macos/*
+            out/windows/* out/linux/* out/macos/* SHA256SUMS

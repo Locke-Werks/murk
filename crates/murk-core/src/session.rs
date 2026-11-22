@@ -624,9 +624,18 @@ impl Session {
                         from: src.to_string(),
                         offer,
                     }),
-                    None => {
-                        self.server_line(out, m, format!("Unsupported DCC from {src}: {}", c.args))
-                    }
+                    None => match murk_proto::dcc::parse_control(c.args) {
+                        Some(control) => out.events.push(Event::DccControl {
+                            network: self.id,
+                            from: src.to_string(),
+                            control,
+                        }),
+                        None => self.server_line(
+                            out,
+                            m,
+                            format!("Unsupported DCC from {src}: {}", c.args),
+                        ),
+                    },
                 }
                 return;
             }

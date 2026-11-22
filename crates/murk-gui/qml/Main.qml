@@ -235,6 +235,14 @@ ApplicationWindow {
                 }
             }
 
+            UpdateBanner {
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.leftMargin: 22
+                anchors.bottomMargin: 100
+                z: 41
+            }
+
             ToastStack {
                 id: toast
                 anchors.right: parent.right

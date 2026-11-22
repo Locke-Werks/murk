@@ -8,7 +8,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
 use std::time::{SystemTime, UNIX_EPOCH};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -297,7 +297,14 @@ fn flash_on(flash: Option<std::time::Instant>) -> bool {
     })
 }
 
-pub fn draw(f: &mut Frame, app: &mut App, media: &mut Media, hits: &mut Hits, tz_offset: i64) {
+pub fn draw(
+    f: &mut Frame,
+    app: &mut App,
+    media: &mut Media,
+    hits: &mut Hits,
+    tz_offset: i64,
+    update_notice: Option<&str>,
+) {
     *hits = Hits::default();
     let theme = &theme_named(&app.config.ui.theme);
     let area = f.area();
@@ -330,7 +337,7 @@ pub fn draw(f: &mut Frame, app: &mut App, media: &mut Media, hits: &mut Hits, tz
     if show_nicks {
         draw_nicks(f, app, nicks, theme, hits);
     }
-    draw_status(f, app, status, theme);
+    draw_status(f, app, status, theme, update_notice);
     if flash_on(app.flash) {
         f.buffer_mut()
             .set_style(status, Style::default().bg(theme.accent).fg(Color::Black));
@@ -363,6 +370,70 @@ pub fn draw(f: &mut Frame, app: &mut App, media: &mut Media, hits: &mut Hits, tz
         input,
     );
     f.set_cursor_position((input.x + (pw + cursor - skip_cols) as u16, input.y));
+    draw_switcher(f, app, area, theme);
+}
+
+const SWITCHER_ROWS: usize = 10;
+
+fn draw_switcher(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
+    let Some(sw) = &app.switcher else {
+        return;
+    };
+    let matches = app.switcher_matches(&sw.query);
+    let w = area.width.saturating_sub(4).min(60);
+    let h = (SWITCHER_ROWS as u16 + 3).min(area.height);
+    let rect = Rect {
+        x: area.x + (area.width - w) / 2,
+        y: area.y + area.height.saturating_sub(h) / 3,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.accent))
+        .title(" Go to buffer ");
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    if inner.height == 0 {
+        return;
+    }
+    let prompt = format!("> {}", sw.query);
+    f.render_widget(
+        Paragraph::new(Span::styled(prompt.clone(), Style::default().fg(theme.fg))),
+        Rect { height: 1, ..inner },
+    );
+    // Keep the selection in view when it moves past the visible rows.
+    let rows = (inner.height as usize).saturating_sub(1);
+    let first = sw.sel.saturating_sub(rows.saturating_sub(1));
+    let items: Vec<ListItem> = matches
+        .iter()
+        .enumerate()
+        .skip(first)
+        .take(rows)
+        .map(|(n, &i)| {
+            let b = &app.buffers[i];
+            let mut style = Style::default().fg(theme.fg);
+            if b.highlighted {
+                style = style.fg(theme.highlight);
+            } else if b.unread > 0 {
+                style = style.fg(theme.accent);
+            }
+            if n == sw.sel {
+                style = style.bg(theme.bar_bg).add_modifier(Modifier::BOLD);
+            }
+            let unread = if b.unread > 0 { format!(" {}", b.unread) } else { String::new() };
+            ListItem::new(Line::from(vec![
+                Span::styled(app.switcher_label(i), style),
+                Span::styled(unread, Style::default().fg(theme.dim)),
+            ]))
+        })
+        .collect();
+    f.render_widget(
+        List::new(items),
+        Rect { y: inner.y + 1, height: inner.height - 1, ..inner },
+    );
+    f.set_cursor_position((inner.x + prompt.width() as u16, inner.y));
 }
 
 fn draw_buffers(f: &mut Frame, app: &App, area: Rect, theme: &Theme, hits: &mut Hits) {
@@ -706,7 +777,7 @@ fn draw_nicks(f: &mut Frame, app: &App, area: Rect, theme: &Theme, hits: &mut Hi
     );
 }
 
-fn draw_status(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
+fn draw_status(f: &mut Frame, app: &App, area: Rect, theme: &Theme, update_notice: Option<&str>) {
     let bar = Style::default().bg(theme.bar_bg).fg(theme.fg);
     let mut parts: Vec<Span> = Vec::new();
     if let Some(b) = app.current() {
@@ -748,6 +819,9 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect, theme: &Theme) {
     }
     if let Some((s, _)) = &app.status {
         parts.push(Span::styled(format!("  {s}"), bar.fg(theme.highlight)));
+    }
+    if let Some(n) = update_notice {
+        parts.push(Span::styled(format!("  [{n}]"), bar.fg(theme.accent)));
     }
     f.render_widget(Paragraph::new(Line::from(parts)).style(bar), area);
 }

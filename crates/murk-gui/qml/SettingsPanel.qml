@@ -232,6 +232,27 @@ Popup {
                     checked: Core.settings.notifyDesktop !== false
                     onToggled: on => Core.set("notifyDesktop", on)
                 }
+                Section { text: "UPDATES" }
+                Toggle {
+                    label: "Check for updates automatically"
+                    hint: "Once a day at startup, Murk asks GitHub for the latest release. Nothing is downloaded until you choose Install."
+                    checked: Core.settings.updateCheck !== false
+                    onToggled: on => Core.set("updateCheck", on)
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Text {
+                        Layout.fillWidth: true
+                        text: "This is Murk " + (Core.settings.version || "")
+                        color: Theme.sub; font.family: Theme.uiFont; font.pixelSize: 13
+                    }
+                    Button {
+                        text: "Check for updates"
+                        onClicked: Core.ctl.checkUpdate(true)
+                        contentItem: Text { text: parent.text; color: Theme.bg; font.family: Theme.uiFont; font.pixelSize: 13; font.weight: Font.DemiBold; horizontalAlignment: Text.AlignHCenter }
+                        background: Rectangle { radius: 9; color: Theme.accent; implicitWidth: 150; implicitHeight: 34 }
+                    }
+                }
                 Item { Layout.fillHeight: true }
             }
 

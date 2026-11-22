@@ -146,6 +146,12 @@ pub enum Event {
         from: String,
         offer: murk_proto::dcc::DccOffer,
     },
+    /// A DCC RESUME or ACCEPT about a transfer already offered in either direction.
+    DccControl {
+        network: NetworkId,
+        from: String,
+        control: murk_proto::dcc::DccControl,
+    },
     /// An emoji reaction (`+draft/react`) to an earlier message.
     React {
         network: NetworkId,

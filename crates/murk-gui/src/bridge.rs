@@ -26,6 +26,8 @@ pub mod qobject {
         #[qproperty(QString, settings)]
         #[qproperty(bool, ready)]
         #[qproperty(QString, transfers)]
+        /// Self-update state as JSON: `{state, version, progress, message, manual}`.
+        #[qproperty(QString, update_info)]
         type Controller = super::ControllerRust;
 
         /// The whole active buffer changed: a JSON array of line objects.
@@ -212,6 +214,23 @@ pub mod qobject {
         /// Send QUIT everywhere; `finished` fires when the links are down.
         #[qinvokable]
         fn shutdown(self: Pin<&mut Controller>);
+
+        /// Look for a new release. `manual` reports "up to date" and errors too;
+        /// the automatic check is silent and runs at most once a day.
+        #[qinvokable]
+        fn check_update(self: Pin<&mut Controller>, manual: bool);
+
+        /// Download, verify and install the release `update_info` offers, then quit.
+        #[qinvokable]
+        fn install_update(self: Pin<&mut Controller>);
+
+        /// Never offer this version again.
+        #[qinvokable]
+        fn skip_update(self: Pin<&mut Controller>);
+
+        /// Hide the offer for this session.
+        #[qinvokable]
+        fn dismiss_update(self: Pin<&mut Controller>);
     }
 
     impl cxx_qt::Threading for Controller {}
@@ -242,6 +261,8 @@ pub struct ControllerRust {
     settings: QString,
     ready: bool,
     transfers: QString,
+    update_info: QString,
+    upd: Upd,
     app: Option<App>,
     path: PathBuf,
     /// What the view currently shows, to send appends instead of full resets.
@@ -250,6 +271,17 @@ pub struct ControllerRust {
     dirty: Vec<String>,
     previewer: Option<murk_media::Previewer>,
     next_upload: i32,
+}
+
+#[derive(Default)]
+struct Upd {
+    available: Option<murk_update::Update>,
+    busy: bool,
+    /// `/update install` with nothing found yet: install as soon as the check finds it.
+    install_when_found: bool,
+    /// Started once every network has said goodbye, so the new copy does not
+    /// collide with our nick on the way out.
+    relaunch: Option<PathBuf>,
 }
 
 #[derive(Default, PartialEq, Clone)]
@@ -585,6 +617,8 @@ fn settings_json(app: &App) -> serde_json::Value {
         "highlights": ui.highlights,
         "inlineMedia": ui.inline_media,
         "notifyDesktop": ui.notify_desktop,
+        "updateCheck": app.config.update.check,
+        "version": env!("CARGO_PKG_VERSION"),
         "uploadReady": upload_ready(app),
         "friends": app.friends().into_iter()
             .map(|(nick, nets)| serde_json::json!({ "nick": nick, "online": nets }))
@@ -663,7 +697,8 @@ impl qobject::Controller {
             });
         });
         self.as_mut().set_ready(true);
-        self.refresh();
+        self.as_mut().refresh();
+        self.check_update(false);
     }
 
     fn apply(mut self: Pin<&mut Self>, batch: Vec<Event>) {
@@ -691,7 +726,8 @@ impl qobject::Controller {
                                     .as_deref()
                                     .is_some_and(|s| s.eq_ignore_ascii_case(b))
                         });
-                        if l.highlight || query {
+                        let idx = app.buffer_index(l.network, l.buffer.as_deref());
+                        if app.should_alert(idx, l.highlight, query) {
                             let sender = l.sender.clone().unwrap_or_default();
                             let title = match (&l.buffer, query) {
                                 (Some(b), false) => format!("{sender} in {b}"),
@@ -702,7 +738,6 @@ impl qobject::Controller {
                                 murk_proto::format::strip(&l.text),
                                 l.network,
                                 l.buffer.clone(),
-                                l.highlight,
                             ));
                         }
                     }
@@ -763,18 +798,13 @@ impl qobject::Controller {
             });
             self.as_mut().whois_ready(qs(&w.nick), json_str(&json));
         }
-        if let Some((title, text, net, buf, highlight)) = alert {
-            let (idx, muted) = self
+        if let Some((title, text, net, buf)) = alert {
+            let idx = self
                 .as_mut()
                 .app_mut()
-                .map(|a| {
-                    let i = a.buffer_index(net, buf.as_deref());
-                    (i as i32, a.is_muted(i))
-                })
-                .unwrap_or((-1, false));
-            if !muted || highlight {
-                self.as_mut().alert(qs(&title), qs(&text), idx);
-            }
+                .map(|a| a.buffer_index(net, buf.as_deref()) as i32)
+                .unwrap_or(-1);
+            self.as_mut().alert(qs(&title), qs(&text), idx);
         }
         self.as_mut().refresh();
         let done = self.app.as_ref().is_some_and(|app| {
@@ -785,7 +815,7 @@ impl qobject::Controller {
                     .all(|n| n.state == ConnState::Disconnected)
         });
         if done {
-            self.finished();
+            self.finish();
         }
     }
 
@@ -820,6 +850,7 @@ impl qobject::Controller {
                 "active": i == active,
                 "typing": !b.typing.is_empty(),
                 "muted": app.is_muted(i),
+                "notify": app.notify_level(i).name(),
                 "pulse": pulse(&b.lines),
             }));
             last_net = Some(b.network);
@@ -1030,10 +1061,24 @@ impl qobject::Controller {
     }
 
     fn with_app(mut self: Pin<&mut Self>, f: impl FnOnce(&mut App)) {
+        let mut req = None;
         if let Some(app) = self.as_mut().app_mut() {
             f(app);
+            req = app.update_request.take();
         }
-        self.refresh();
+        self.as_mut().refresh();
+        match req {
+            Some(murk_client::app::UpdateRequest::Check) => self.check_update(true),
+            Some(murk_client::app::UpdateRequest::Install) => {
+                if self.upd.available.is_some() {
+                    self.install_update();
+                } else {
+                    self.as_mut().rust_mut().get_mut().upd.install_when_found = true;
+                    self.check_update(true);
+                }
+            }
+            None => {}
+        }
     }
 
     pub fn submit(self: Pin<&mut Self>, text: &QString) {
@@ -1171,6 +1216,14 @@ impl qobject::Controller {
                         app.set_muted(i, action == "mute");
                         if let Err(e) = app.config.save(&path) {
                             app.set_status(format!("Could not save settings: {e}"));
+                        }
+                    }
+                    a if a.starts_with("notify:") => {
+                        if let Some(level) = murk_client::NotifyLevel::parse(&a[7..]) {
+                            app.set_notify_level(i, level);
+                            if let Err(e) = app.config.save(&path) {
+                                app.set_status(format!("Could not save settings: {e}"));
+                            }
                         }
                     }
                     "read" => app.mark_read_at(i),
@@ -1394,6 +1447,7 @@ impl qobject::Controller {
             .map(|(n, u)| serde_json::json!({ "name": n, "usage": u }))
             .collect();
         v.push(serde_json::json!({ "name": "script", "usage": "/script [list|reload]" }));
+        v.push(serde_json::json!({ "name": "update", "usage": "/update [check|install]" }));
         if let Some(s) = self.app.as_ref().and_then(|a| a.scripts.as_ref()) {
             for (n, u) in s.commands() {
                 v.push(serde_json::json!({ "name": n, "usage": format!("{u}  (script)") }));
@@ -1434,6 +1488,7 @@ impl qobject::Controller {
             ("nicklist", serde_json::Value::Bool(b)) => ui.nicklist = *b,
             ("inlineMedia", serde_json::Value::Bool(b)) => ui.inline_media = *b,
             ("notifyDesktop", serde_json::Value::Bool(b)) => ui.notify_desktop = *b,
+            ("updateCheck", serde_json::Value::Bool(b)) => app.config.update.check = *b,
             ("highlights", serde_json::Value::Array(a)) => {
                 ui.highlights = a
                     .iter()
@@ -1625,7 +1680,195 @@ impl qobject::Controller {
             None => true,
         };
         if done {
-            self.finished();
+            self.finish();
         }
+    }
+
+    fn finish(mut self: Pin<&mut Self>) {
+        if let Some(exe) = self.as_mut().rust_mut().get_mut().upd.relaunch.take()
+            && let Err(e) = murk_update::spawn(&exe)
+        {
+            eprintln!("murk-gui: {e}");
+        }
+        self.finished();
+    }
+
+    fn publish_update(self: Pin<&mut Self>, v: serde_json::Value) {
+        self.set_update_info(json_str(&v));
+    }
+
+    pub fn check_update(mut self: Pin<&mut Self>, manual: bool) {
+        if self.upd.busy {
+            return;
+        }
+        let target = match murk_update::Target::detect(murk_update::Frontend::Gui) {
+            Ok(t) => t,
+            Err(e) => {
+                if manual {
+                    self.publish_update(
+                        serde_json::json!({ "state": "error", "message": e, "manual": true }),
+                    );
+                }
+                return;
+            }
+        };
+        if !manual {
+            let path = self.path.clone();
+            let Some(app) = self.as_mut().app_mut() else {
+                return;
+            };
+            let now = murk_update::now_secs();
+            if !app.config.update.check || !murk_update::due(app.config.update.last_check, now) {
+                return;
+            }
+            app.config.update.last_check = Some(now);
+            let _ = app.config.save(&path);
+        }
+        self.as_mut().rust_mut().get_mut().upd.busy = true;
+        if manual {
+            self.as_mut()
+                .publish_update(serde_json::json!({ "state": "checking", "manual": true }));
+        }
+        let qt = self.qt_thread();
+        crate::runtime().spawn(async move {
+            let r = murk_update::check(&target).await;
+            let _ = qt.queue(move |c| c.update_checked(manual, r));
+        });
+    }
+
+    fn update_checked(
+        mut self: Pin<&mut Self>,
+        manual: bool,
+        r: Result<Option<murk_update::Update>, String>,
+    ) {
+        let install = {
+            let upd = &mut self.as_mut().rust_mut().get_mut().upd;
+            upd.busy = false;
+            std::mem::take(&mut upd.install_when_found)
+        };
+        match r {
+            Ok(Some(u)) => {
+                let version = u.version.to_string();
+                let skipped = self
+                    .app
+                    .as_ref()
+                    .is_some_and(|a| a.config.update.skip.as_deref() == Some(version.as_str()));
+                if skipped && !manual {
+                    return;
+                }
+                self.as_mut().rust_mut().get_mut().upd.available = Some(u);
+                self.as_mut().publish_update(
+                    serde_json::json!({ "state": "available", "version": version, "manual": manual }),
+                );
+                if install {
+                    self.install_update();
+                }
+            }
+            Ok(None) if manual => self.publish_update(serde_json::json!({
+                "state": "current", "version": env!("CARGO_PKG_VERSION"), "manual": true,
+            })),
+            Err(e) if manual => self.publish_update(
+                serde_json::json!({ "state": "error", "message": e, "manual": true }),
+            ),
+            _ => {}
+        }
+    }
+
+    pub fn install_update(mut self: Pin<&mut Self>) {
+        if self.upd.busy {
+            return;
+        }
+        let Some(update) = self.upd.available.clone() else {
+            return;
+        };
+        let target = match murk_update::Target::detect(murk_update::Frontend::Gui) {
+            Ok(t) => t,
+            Err(e) => {
+                self.publish_update(
+                    serde_json::json!({ "state": "error", "message": e, "manual": true }),
+                );
+                return;
+            }
+        };
+        self.as_mut().rust_mut().get_mut().upd.busy = true;
+        let version = update.version.to_string();
+        self.as_mut().publish_update(
+            serde_json::json!({ "state": "downloading", "version": version, "progress": 0.0 }),
+        );
+        let qt = self.qt_thread();
+        crate::runtime().spawn(async move {
+            let dir = murk_update::download_dir();
+            let pqt = qt.clone();
+            let v = version.clone();
+            let mut last = u64::MAX;
+            let file = murk_update::download(&update, &dir, move |got, total| {
+                // One queued call per percent, not one per network chunk.
+                let pct = got * 100 / total.max(1);
+                if pct != last {
+                    last = pct;
+                    let v = v.clone();
+                    let _ = pqt.queue(move |c| {
+                        c.publish_update(serde_json::json!({
+                            "state": "downloading", "version": v, "progress": pct as f64 / 100.0,
+                        }))
+                    });
+                }
+            })
+            .await;
+            let result = match file {
+                Ok(file) => {
+                    let v = version.clone();
+                    let _ = qt.queue(move |c| {
+                        c.publish_update(serde_json::json!({ "state": "installing", "version": v }))
+                    });
+                    tokio::task::spawn_blocking(move || {
+                        murk_update::install(&target, &file, murk_update::Frontend::Gui)
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(e.to_string()))
+                }
+                Err(e) => Err(e),
+            };
+            let _ = qt.queue(move |c| c.update_installed(version, result));
+        });
+    }
+
+    fn update_installed(
+        mut self: Pin<&mut Self>,
+        version: String,
+        r: Result<murk_update::After, String>,
+    ) {
+        match r {
+            Ok(after) => {
+                if let murk_update::After::Relaunch(exe) = after {
+                    self.as_mut().rust_mut().get_mut().upd.relaunch = Some(exe);
+                }
+                self.as_mut().publish_update(serde_json::json!({
+                    "state": "installing", "version": version, "message": "Restarting",
+                }));
+                self.shutdown();
+            }
+            Err(e) => {
+                self.as_mut().rust_mut().get_mut().upd.busy = false;
+                self.publish_update(serde_json::json!({
+                    "state": "error", "version": version, "message": e, "manual": true, "retry": true,
+                }));
+            }
+        }
+    }
+
+    pub fn skip_update(mut self: Pin<&mut Self>) {
+        let path = self.path.clone();
+        if let Some(u) = self.as_mut().rust_mut().get_mut().upd.available.take()
+            && let Some(app) = self.as_mut().app_mut()
+        {
+            app.config.update.skip = Some(u.version.to_string());
+            let _ = app.config.save(&path);
+        }
+        self.publish_update(serde_json::json!({ "state": "" }));
+    }
+
+    pub fn dismiss_update(self: Pin<&mut Self>) {
+        self.publish_update(serde_json::json!({ "state": "" }));
     }
 }

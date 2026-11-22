@@ -2,6 +2,7 @@
 
 mod media;
 mod ui;
+mod update;
 
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -142,7 +143,9 @@ async fn main() {
 
     let mut terminal = ratatui::init();
     let _ = execute!(std::io::stdout(), EnableBracketedPaste, EnableMouseCapture);
-    let result = run(&mut terminal, &mut app, engine, tz_offset).await;
+    let mut updater = update::Updater::new();
+    updater.startup(&mut app);
+    let result = run(&mut terminal, &mut app, &mut updater, engine, tz_offset).await;
     let _ = execute!(
         std::io::stdout(),
         DisableBracketedPaste,
@@ -152,11 +155,13 @@ async fn main() {
     if let Err(e) = result {
         eprintln!("murk: {e}");
     }
+    updater.finish();
 }
 
 async fn run(
     terminal: &mut ratatui::DefaultTerminal,
     app: &mut App,
+    updater: &mut update::Updater,
     engine: Engine,
     tz_offset: i64,
 ) -> std::io::Result<()> {
@@ -172,12 +177,15 @@ async fn run(
     let mut hits = ui::Hits::default();
 
     loop {
+        if let Some(req) = app.update_request.take() {
+            updater.request(app, req);
+        }
         // Synchronized output: the terminal shows each frame whole, instead of the
         // half-drawn state in between. Without it a picture being replaced (video
         // above all) flickers through its cleared area. Terminals that do not know
         // the mode ignore it.
         let _ = execute!(std::io::stdout(), BeginSynchronizedUpdate);
-        terminal.draw(|f| ui::draw(f, app, &mut media, &mut hits, tz_offset))?;
+        terminal.draw(|f| ui::draw(f, app, &mut media, &mut hits, tz_offset, updater.notice.as_deref()))?;
         // Graphics are not cells: a picture that moved or vanished leaves its old
         // pixels behind until something paints over them. Repaint everything then.
         if media.drawn != last_drawn {
@@ -185,7 +193,7 @@ async fn run(
             last_drawn = media.drawn.clone();
             if moved {
                 terminal.clear()?;
-                terminal.draw(|f| ui::draw(f, app, &mut media, &mut hits, tz_offset))?;
+                terminal.draw(|f| ui::draw(f, app, &mut media, &mut hits, tz_offset, updater.notice.as_deref()))?;
             }
         }
         let _ = execute!(std::io::stdout(), EndSynchronizedUpdate);
@@ -250,6 +258,7 @@ async fn run(
                     app.flash = None;
                 }
             }
+            Some(m) = updater.rx.recv() => updater.handle(app, m),
             _ = tick.tick() => app.tick(),
         }
     }
@@ -366,6 +375,36 @@ fn open_external(url: &str) {
     let _ = cmd;
 }
 
+/// Keys while the Ctrl+G switcher is open; the editor keeps its text untouched underneath.
+fn switcher_key(app: &mut App, k: KeyEvent, ctrl: bool) {
+    let count = app
+        .switcher
+        .as_ref()
+        .map(|s| app.switcher_matches(&s.query).len())
+        .unwrap_or(0);
+    let Some(sw) = app.switcher.as_mut() else {
+        return;
+    };
+    match k.code {
+        KeyCode::Esc => app.switcher = None,
+        KeyCode::Char('g' | 'c') if ctrl => app.switcher = None,
+        KeyCode::Enter => app.accept_switcher(),
+        KeyCode::Up => sw.sel = sw.sel.saturating_sub(1),
+        KeyCode::Char('p') if ctrl => sw.sel = sw.sel.saturating_sub(1),
+        KeyCode::Down | KeyCode::Tab => sw.sel = (sw.sel + 1).min(count.saturating_sub(1)),
+        KeyCode::Char('n') if ctrl => sw.sel = (sw.sel + 1).min(count.saturating_sub(1)),
+        KeyCode::Backspace => {
+            sw.query.pop();
+            sw.sel = 0;
+        }
+        KeyCode::Char(c) if !ctrl => {
+            sw.query.push(c);
+            sw.sel = 0;
+        }
+        _ => {}
+    }
+}
+
 fn handle_key(app: &mut App, media: &mut media::Media, k: KeyEvent) {
     let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
     let alt = k.modifiers.contains(KeyModifiers::ALT);
@@ -379,8 +418,13 @@ fn handle_key(app: &mut App, media: &mut media::Media, k: KeyEvent) {
             };
         }
     };
+    if app.switcher.is_some() {
+        switcher_key(app, k, ctrl);
+        return;
+    }
     let mut edited = false;
     match k.code {
+        KeyCode::Char('g') if ctrl => app.open_switcher(),
         KeyCode::Char('c') if ctrl => {
             if app.editor.is_empty() {
                 app.submit_quit();

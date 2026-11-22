@@ -145,6 +145,10 @@ pub struct Ui {
     pub inline_media: bool,
     /// Buffers that never count as unread or alert, except for direct mentions: "Network/#chan".
     pub muted: Vec<String>,
+    /// Buffers where every message alerts as if it were a mention: "Network/#chan".
+    pub notify_all: Vec<String>,
+    /// Buffers that never count as unread or alert, mentions included: "Network/#chan".
+    pub silenced: Vec<String>,
     /// Show a desktop notification for mentions and private messages while unfocused.
     pub notify_desktop: bool,
     /// Nicks watched with MONITOR on every network; they show in the sidebar when online.
@@ -164,6 +168,8 @@ impl Default for Ui {
             font_size: 11,
             inline_media: true,
             muted: Vec::new(),
+            notify_all: Vec::new(),
+            silenced: Vec::new(),
             notify_desktop: true,
             friends: Vec::new(),
         }
@@ -181,6 +187,7 @@ pub struct Config {
     pub aliases: std::collections::BTreeMap<String, String>,
     pub ignore: Vec<String>,
     pub upload: Upload,
+    pub update: UpdateSettings,
 }
 
 /// Where dropped and pasted files go. A server that advertises FILEHOST is used
@@ -192,6 +199,28 @@ pub struct Upload {
     pub url: Option<String>,
     /// Bearer token for `url`, normally `{ keyring = "files" }`.
     pub token: Option<Secret>,
+}
+
+/// Self-update. Checks run in the background at most once a day.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdateSettings {
+    /// Look for a new release on startup.
+    pub check: bool,
+    /// When the last automatic check ran, in seconds since the Unix epoch.
+    pub last_check: Option<u64>,
+    /// A version the user chose to skip; it is not offered again, newer ones are.
+    pub skip: Option<String>,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        UpdateSettings {
+            check: true,
+            last_check: None,
+            skip: None,
+        }
+    }
 }
 
 pub fn config_dir() -> PathBuf {
@@ -390,5 +419,16 @@ j = "/join $1"
         );
         assert_eq!(expand_alias("say $* $$", " x y "), "say x y $$");
         assert_eq!(expand_alias("$3", "a"), "");
+    }
+
+    #[test]
+    fn update_section() {
+        let c: Config = toml::from_str("").unwrap();
+        assert!(c.update.check);
+        assert_eq!(c.update.skip, None);
+        let c: Config = toml::from_str("[update]\ncheck = false\nskip = \"0.4.0\"\n").unwrap();
+        assert!(!c.update.check);
+        assert_eq!(c.update.skip.as_deref(), Some("0.4.0"));
+        assert_eq!(c.update.last_check, None);
     }
 }
