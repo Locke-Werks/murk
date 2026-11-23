@@ -151,6 +151,8 @@ pub struct Ui {
     pub silenced: Vec<String>,
     /// Show a desktop notification for mentions and private messages while unfocused.
     pub notify_desktop: bool,
+    /// Play the system notification sound with each desktop notification.
+    pub notify_sound: bool,
     /// Nicks watched with MONITOR on every network; they show in the sidebar when online.
     pub friends: Vec<String>,
 }
@@ -171,6 +173,7 @@ impl Default for Ui {
             notify_all: Vec::new(),
             silenced: Vec::new(),
             notify_desktop: true,
+            notify_sound: true,
             friends: Vec::new(),
         }
     }

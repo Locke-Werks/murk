@@ -14,6 +14,7 @@ ApplicationWindow {
     flags: Qt.Window | Qt.FramelessWindowHint
     // Unread messages elsewhere show in the taskbar: "(3) #rust · Murk".
     readonly property int unreadElsewhere: Core.buffers.reduce((n, b) => n + (b.active || b.muted ? 0 : b.unread), 0)
+    onUnreadElsewhereChanged: Core.ctl.setBadge(unreadElsewhere)
     title: (unreadElsewhere > 0 ? "(" + unreadElsewhere + ") " : "")
         + (Core.ctl.title.length ? Core.ctl.title + "  ·  Murk" : "Murk")
     color: Theme.bg

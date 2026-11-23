@@ -232,6 +232,12 @@ Popup {
                     checked: Core.settings.notifyDesktop !== false
                     onToggled: on => Core.set("notifyDesktop", on)
                 }
+                Toggle {
+                    label: "Notification sound"
+                    hint: "Play the system sound with each desktop notification. Set a channel to All (/notify all) to hear every message there."
+                    checked: Core.settings.notifySound !== false
+                    onToggled: on => Core.set("notifySound", on)
+                }
                 Section { text: "UPDATES" }
                 Toggle {
                     label: "Check for updates automatically"

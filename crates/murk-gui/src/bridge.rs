@@ -8,6 +8,12 @@ pub mod qobject {
         type QString = cxx_qt_lib::QString;
     }
 
+    #[namespace = "murk"]
+    unsafe extern "C++" {
+        include!("badge.h");
+        fn set_badge_number(n: i32);
+    }
+
     #[auto_cxx_name]
     extern "RustQt" {
         #[qobject]
@@ -192,6 +198,10 @@ pub mod qobject {
         /// Show a desktop notification.
         #[qinvokable]
         fn notify(self: &Controller, title: &QString, text: &QString);
+
+        /// Unread count on the taskbar button or dock icon; zero clears it.
+        #[qinvokable]
+        fn set_badge(self: &Controller, count: i32);
 
         /// Change one UI setting and persist it. `value` is JSON.
         #[qinvokable]
@@ -489,14 +499,22 @@ fn upload_target(app: &App) -> Result<(String, murk_media::upload::Auth), String
             return Ok((url.clone(), Auth::Basic { user, pass }));
         }
     }
-    let Some(endpoint) = app.config.upload.url.clone().filter(|u| !u.trim().is_empty()) else {
+    let Some(endpoint) = app
+        .config
+        .upload
+        .url
+        .clone()
+        .filter(|u| !u.trim().is_empty())
+    else {
         return Err(match filehost {
             Some((_, name)) => format!(
                 "{name} has a file host, but uploading to it needs this network's SASL PLAIN \
                  login. Set the account and password in the network editor."
             ),
-            None => "This network has no file host. Set [upload] in the config to share files here."
-                .into(),
+            None => {
+                "This network has no file host. Set [upload] in the config to share files here."
+                    .into()
+            }
         });
     };
     let auth = match app.config.upload.token.as_ref().map(|t| t.resolve()) {
@@ -617,6 +635,7 @@ fn settings_json(app: &App) -> serde_json::Value {
         "highlights": ui.highlights,
         "inlineMedia": ui.inline_media,
         "notifyDesktop": ui.notify_desktop,
+        "notifySound": ui.notify_sound,
         "updateCheck": app.config.update.check,
         "version": env!("CARGO_PKG_VERSION"),
         "uploadReady": upload_ready(app),
@@ -1458,14 +1477,28 @@ impl qobject::Controller {
 
     pub fn notify(&self, title: &QString, text: &QString) {
         let (title, text) = (title.to_string(), text.to_string());
+        let sound = self.app.as_ref().is_none_or(|a| a.config.ui.notify_sound);
         // Toasts can block briefly while the shell answers; keep that off the UI thread.
         std::thread::spawn(move || {
-            let _ = notify_rust::Notification::new()
-                .appname("Murk")
-                .summary(&title)
-                .body(&text)
-                .show();
+            let mut n = notify_rust::Notification::new();
+            n.appname("Murk").summary(&title).body(&text);
+            // Without it Windows attributes the toast to PowerShell.
+            #[cfg(windows)]
+            n.app_id(crate::AUMID);
+            // Without a sound name Windows posts the toast silently.
+            if sound {
+                n.sound_name(if cfg!(target_os = "macos") {
+                    "Glass"
+                } else {
+                    "IM"
+                });
+            }
+            let _ = n.show();
         });
+    }
+
+    pub fn set_badge(&self, count: i32) {
+        qobject::set_badge_number(count.max(0));
     }
 
     pub fn set_setting(mut self: Pin<&mut Self>, key: &QString, value: &QString) {
@@ -1488,6 +1521,7 @@ impl qobject::Controller {
             ("nicklist", serde_json::Value::Bool(b)) => ui.nicklist = *b,
             ("inlineMedia", serde_json::Value::Bool(b)) => ui.inline_media = *b,
             ("notifyDesktop", serde_json::Value::Bool(b)) => ui.notify_desktop = *b,
+            ("notifySound", serde_json::Value::Bool(b)) => ui.notify_sound = *b,
             ("updateCheck", serde_json::Value::Bool(b)) => app.config.update.check = *b,
             ("highlights", serde_json::Value::Array(a)) => {
                 ui.highlights = a
